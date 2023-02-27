@@ -14,7 +14,6 @@ import random
 import numpy as np
 import sys
 
-from coreset.Line import Line
 import matplotlib.pyplot as plt
 
 class SetOfPoints:
@@ -584,7 +583,7 @@ class SetOfPoints:
 
     #######################################################################
 
-    def get_probabilites(self):
+    def get_probabbilites(self):
         """
         The method returns the probabilities to be choosen as described in line 9 in main alg
         Returns:

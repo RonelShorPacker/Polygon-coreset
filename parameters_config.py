@@ -4,7 +4,7 @@ class ParameterConfig:
         # main parameters
         self.header_indexes = None
         self.dim = 2
-        self.lines_number = 4
+        self.k = 4
         self.coreset_size = None
 
         # experiment  parameters
@@ -62,6 +62,6 @@ class ParameterConfig:
         self.output_file_name = None
 
         # Bi-criteria parameters
-        self.sample_size_bi_criteria = self.lines_number * 2 # k(j+1)
+        self.sample_size_bi_criteria = self.k * 2 # k(j+1)
         self.reduce_each_iteration = 0.5
         self.fast_bi_criteria = True

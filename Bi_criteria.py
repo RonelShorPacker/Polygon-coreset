@@ -1,5 +1,5 @@
 import numpy as np
-from coreset.parameters_config import ParameterConfig
+from parameters_config import ParameterConfig
 from sklearn.decomposition import TruncatedSVD
 from scipy.linalg import null_space
 
@@ -147,8 +147,8 @@ def computeBicriteria(P, W):
     Q = np.arange(0, n, 1)
     t = 0
     B = []
-    tol_sample_size = parametrs_config.lines_number * (1 + 1)
-    sample_size = (lambda t: int(np.ceil(parametrs_config.lines_number * (1 + 1) * (2 + np.log(1 + 1) + np.log(parametrs_config.lines_number) + min(t, np.log(np.log(n)))))))
+    tol_sample_size = parametrs_config.k * (1 + 1)
+    sample_size = (lambda t: int(np.ceil(parametrs_config.k * (1 + 1) * (2 + np.log(1 + 1) + np.log(parametrs_config.k) + min(t, np.log(np.log(n)))))))
 
     while np.size(Q) >= tol_sample_size:  # run we have small set of points
         S = []
@@ -182,7 +182,6 @@ def projectPointsToSubspace(P, X, v):
 
 def applyBiCriteria(P, B, I):
     clusters = []
-    sum = 0
     for i in range(len(B)):
         F = np.array(B)
         idx = np.where(I == i)[0]
@@ -190,13 +189,10 @@ def applyBiCriteria(P, B, I):
             P_c = P.get_points_from_indices(idx)
             P_proj = P_c.project_on_subspace(F[i])
             clusters.append([P_proj, F])
-            # P_proj = np.apply_along_axis(lambda x: np.matmul(F[i][0]*F[i][0].T, x - F[i][1]) + F[i][1], axis=1, arr=P_c.points)
-            # clusters.append()
-            # sum += np.sum(computeDistanceToSubspace(P[idx, :], F[i][0], F[i][1]))
         else:
             continue
 
-    return np.array(clusters, dtype=object), sum
+    return np.array(clusters, dtype=object)
 
 
 
