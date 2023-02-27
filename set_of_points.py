@@ -27,15 +27,17 @@ class SetOfPoints:
 
     ##################################################################################
 
-    def __init__(self, P=None, w=None, sen=None, indexes = None):
+    def __init__(self, P=None, w=None, sen=None, indexes = None, parameters_config = None):
         """
         C'tor
         :param P: np.ndarray - set of points
         :param w: np.ndarray - set of weights
         :param sen: np.ndarray - set of sensitivities
+        :param parameters_config: class - The parameters we are using
         """
         #if (indexes != [] and len(P) == 0) or (indexes == [] and len(P) != 0):
         #    assert indexes != [] and len(P) != 0, "not indexes == [] and len(P) == 0"
+        self.parameters_config = parameters_config
 
         if P is None:
             P = []
@@ -152,7 +154,7 @@ class SetOfPoints:
         sample_weights = self.weights[indices]
         sample_indexes = self.indexes[indices]
 
-        return SetOfPoints(sample_points, sample_weights, indexes=sample_indexes)
+        return SetOfPoints(sample_points, sample_weights, indexes=sample_indexes, parameters_config=self.parameters_config)
 
     ##################################################################################
 
@@ -163,7 +165,7 @@ class SetOfPoints:
         """
         Proj = F[0] * F[0].T
         P_proj = Proj.dot((self.points - F[1]).T).T + F[1]
-        return SetOfPoints(P_proj, self.weights, indexes=self.indexes)
+        return SetOfPoints(P_proj, self.weights, indexes=self.indexes, parameters_config=self.parameters_config)
 
     ##################################################################################
 
@@ -210,7 +212,10 @@ class SetOfPoints:
 
         points = P.points
         weights = P.weights.reshape(-1, 1)
-        sensitivities = P.sensitivities.reshape(-1, 1)
+        try:
+            sensitivities = P.sensitivities.reshape(-1, 1)
+        except:
+            print("a")
         indexes = P.indexes.reshape(-1)
 
         size = self.get_size()
@@ -891,7 +896,115 @@ class SetOfPoints:
             plt.show()
         return points_on_Bi_Criteria
 
+    #########################################################
+    def coreset_return_sensitivities(self, P, k, m):
+        """
+        Args:
+            P (SetOfPoints) : set of weighted points
+            k (int) : number of weighted centers
+            m (int) : size of wanted coreset
+        Returns:
+            SetOfPoints: the coreset of P for k weighted centers. See Alg. 2 in the paper;
+        """
+        median_sample_size = self.parameters_config.median_sample_size
+        closest_to_median_rate = self.parameters_config.closest_to_median_rate
+        assert k > 0, "k is not a positive integer"
+        assert m > 0, "m is not a positive integer"
+        assert P.get_size() != 0, "Q size is zero"
+        number_of_remains_multiply_factor = self.parameters_config.number_of_remains_multiply_factor
+        max_sensitivity_multiply_factor = self.parameters_config.max_sensitivity_multiply_factor
+        minimum_number_of_points_in_iteration = k*number_of_remains_multiply_factor #int(math.log(P.get_size()))
+        Q = copy.deepcopy(P)
+        temp_set = SetOfPoints()
+        max_sensitivity = -1
+        flag1 = False
+        flag2 = False
+        while True:
+            [q_k, Q_k] = self.recursive_robust_median(Q, k, median_sample_size, closest_to_median_rate) #get the recursive median q_k and its closest points Q_k
+            if Q_k.get_size() == 0:
+                flag1 = True
+                continue
+            Q_k.set_sensitivities(k)# sets all the sensitivities in Q_k as described in line 5 in main alg.
+            current_sensitivity = Q_k.get_arbitrary_sensitivity()
+            if current_sensitivity > max_sensitivity:
+                max_sensitivity = current_sensitivity #we save the maximum sensitivity in order to give the highest sensitivity to the points that remains in Q after this loop ends
+            temp_set.add_set_of_points(Q_k) #since we remove Q_k from Q each time, we still want to save every thing in order to go over the entire points after this loop ends and select from them and etc., so we save everything in temp_set
+            Q.remove_from_set(Q_k)
+            size = Q.get_size()
+            size_Q_k = Q_k.get_size()
+            Q_k_weigted_size = Q_k.get_sum_of_weights()
+            if size <= minimum_number_of_points_in_iteration or Q_k_weigted_size == 0: # stop conditions
+                flag2 = True
+                break
+        if Q.get_size() > 0:
+            Q.set_all_sensitivities(max_sensitivity * max_sensitivity_multiply_factor) # here we set the sensitivities of the points who left to the highest - since they are outliers with a very high probability
+            temp_set.add_set_of_points(Q) #and now temp_set is all the points we began with - just with updated sensitivities
+        T = temp_set.get_sum_of_sensitivities()
+        temp_set.set_weights(T, m) #sets the weights as described in line 10 in main alg
+        #temp_set.sort_by_indexes() #change this line in tests for sensativities bound
+        return temp_set#temp_set.sensitivities, temp_set.weights
 
+    #########################################################
+    def computeSensativities(self):
+        con1 = np.vectorize(self.f1)
+        con2 = np.vectorize(self.f2)
+        cluster_WKmeans = self.coreset_return_sensitivities(self, self.parameters_config.k,
+                                                         self.parameters_config.coreset_size)
+        idx_sort = self.sortOnSubspace()
+        S = np.maximum.reduce([con1(idx_sort), con2(idx_sort, self.get_size()), np.squeeze(
+            cluster_WKmeans.sensitivities) if cluster_WKmeans.get_size() > 1 else cluster_WKmeans.sensitivities])
+        return S
+        # cluster_WKmeans.sensitivities = S
+        # return cluster_WKmeans
 
+    #########################################################
 
+    @staticmethod
+    def f1(x):
+        return 1 / x
 
+    #########################################################
+    @staticmethod
+    def f2(x, n):
+        return 1 / (n - x + 1)
+
+    #########################################################
+    def sortOnSubspace(self):
+        if self.get_size() == 1:
+            return np.array([1])
+        else:
+            v = self.points[0] - self.points[1]
+            I = np.apply_along_axis(lambda x: np.dot(x, v), axis=1, arr=self.points)
+            return np.argsort(I) + 1
+
+    #########################################################
+    def recursive_robust_median(self, P, k, median_sample_size, recursive_median_closest_to_median_rate):
+        """
+        Args:
+            P (SetOfPoints) : set of weighted points
+            k (int) : number of weighted centers
+            median_sample_size (int) : the size of closest points to the median
+            recursive_median_closest_to_median_rate (float) : parameter for the median
+
+        Returns:
+            [np.ndarray, SetOfPoints]: the recursive robust median of P and its closest points. See Alg. 1 in the paper;
+        """
+
+        iterations_median = self.parameters_config.iterations_median
+
+        assert k > 0, "k is not a positive integer"
+        assert recursive_median_closest_to_median_rate < 1 and recursive_median_closest_to_median_rate > 0, "closest_rate2 not in (0,1)"
+        assert P.get_size() != 0, "Q size is zero"
+
+        minimum_number_of_points_in_iteration = int(np.log(P.get_size())) #for stop condition
+        Q = copy.deepcopy(P)
+        q = []
+        for i in range(iterations_median):#used to be until k
+            size_of_sample = median_sample_size
+            q = Q.get_sample_of_points(size_of_sample)
+            Q = Q.get_closest_points_to_set_of_points(q, recursive_median_closest_to_median_rate, type="by rate") #the median closest points
+
+            size = Q.get_size()
+            if size <= minimum_number_of_points_in_iteration:
+                break
+        return [q, Q]
