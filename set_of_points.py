@@ -107,22 +107,6 @@ class SetOfPoints:
             sample_indexes = np.take(self.indexes, sample_indices, axis=0, out=None, mode='raise')
             return SetOfPoints(sample_points, sample_weights,indexes=sample_indexes)
 
-    ##################################################################################
-
-    def compute_distances_from_lines(self, lines):
-        costs = []
-        for point in self.points:
-            cost_point = sys.maxsize
-            for line in lines:
-                dist = line.distance_from_point(point)
-                cost_point = dist if dist < cost_point else cost_point
-            costs.append(cost_point)
-        return np.array(costs)
-
-
-
-    ###################################################################################
-
 
     ###################################################################################
     def get_size(self):

@@ -1,14 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from main import coreset
-
+from main import coreset, sampleCoreset
+from algo import exhaustive_search
 
 class Test:
     def __init__(self, P, iterations):
         self.P = P
         self.iterations = iterations
     def testUniformSampling(self):
-        C = coreset(self.P)
+        sen = coreset(self.P, sen=True)
         for i in range(self.iterations):
-            uniform_sample_indices = np.random.uniform(self.P.get_size(), size=C.get_size())
-            uniform_sample = self.P[uniform_sample_indices, :]
+            uniform_sample = self.P.get_sample_of_points(C.get_size())
+            C = sampleCoreset()
+            exhaustive_search(uniform_sample)

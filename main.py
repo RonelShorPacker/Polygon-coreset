@@ -15,12 +15,12 @@ def sampleCoreset(P):
     s = P.sensitivities[indices_sample].reshape(1, -1)[0]
     return SetOfPoints(A, v, s)
 
-def coreset(P):
+def coreset(P, sen=False):
     """
     Args:
-        P: SetofPoints,
-        W: np.array, weight of each point
-    Returns: SetofPoints, coreset
+        P: SetofPoints
+        sen: bool, whether to return sensitivities or coreset
+    Returns: SetofPoints, coreset or np.array, sensitivities
 
     """
 
@@ -44,7 +44,10 @@ def coreset(P):
         P_S.add_set_of_points(tmp)
     P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
 
-    return sampleCoreset(P_S)
+    if sen:
+        return P_S
+    else:
+        return sampleCoreset(P_S)
 
 
 def main():
