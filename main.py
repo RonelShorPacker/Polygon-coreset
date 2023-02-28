@@ -7,6 +7,14 @@ from parameters_config import ParameterConfig
 from create_data import polygon_data
 
 
+def sampleCoreset(P):
+    probs = P.get_probabbilites().reshape(1, -1)[0]
+    indices_sample = np.random.choice(np.arange(P.get_size()), P.parameters_config.coreset_size, True, probs.astype(float))
+    A = P.points[indices_sample]
+    v = P.weights[indices_sample].reshape(1, -1)[0]
+    s = P.sensitivities[indices_sample].reshape(1, -1)[0]
+    return SetOfPoints(A, v, s)
+
 def coreset(P):
     """
     Args:
@@ -28,12 +36,15 @@ def coreset(P):
 
     P_S = SetOfPoints(parameters_config=P.parameters_config)
 
+    # compute sensitivity per cluster
     for cluster in P_proj[:, 0]:
         sen = cluster.computeSensativities()
         orig_P = P.get_points_from_indices(cluster.indexes).points
         tmp = SetOfPoints(P=orig_P, sen=sen, indexes=cluster.indexes)
         P_S.add_set_of_points(tmp)
     P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
+
+    return sampleCoreset(P_S)
 
 
 def main():
