@@ -16,6 +16,7 @@ import sys
 
 import matplotlib.pyplot as plt
 
+from parameters_config import ParameterConfig
 class SetOfPoints:
     """
     Class that represent a set of weighted points in any d>0 dimensional space
@@ -37,8 +38,10 @@ class SetOfPoints:
         """
         #if (indexes != [] and len(P) == 0) or (indexes == [] and len(P) != 0):
         #    assert indexes != [] and len(P) != 0, "not indexes == [] and len(P) == 0"
-        self.parameters_config = parameters_config
-
+        if parameters_config:
+            self.parameters_config = parameters_config
+        else:
+            self.parameters_config = ParameterConfig()
         if P is None:
             P = []
         if w is None:
