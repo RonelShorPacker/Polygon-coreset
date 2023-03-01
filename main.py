@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from set_of_points import SetOfPoints
 from tests import Test
 from parameters_config import ParameterConfig
@@ -10,9 +9,9 @@ def main():
     # create data
     data = polygon_data(params.k, is_debug=True)
     P = SetOfPoints(data, parameters_config=params)
-    sizes = np.linspace(20, 200, 20)
-    test = Test(P, 1000, sizes)
-    test.testvsOpt()
+    sizes = np.linspace(20, 200, 10, dtype=int)
+    test = Test(P, 10, sizes)
+    test.testUniformSampling()
 
 
 

@@ -86,7 +86,7 @@ def polygon_data(k, with_partition=False, is_debug=False):
 
     # segment groups
     for i in range(k):
-        num_points = np.random.randint(750, 1250)
+        num_points = np.random.randint(250, 500)
         noise = np.random.normal(0, 1, (num_points, 2))
         lam = np.random.uniform(0.15, 1, num_points)
         points = []
@@ -100,7 +100,7 @@ def polygon_data(k, with_partition=False, is_debug=False):
 
     # vertex groups
     for i in range(k):
-        num_points = np.random.randint(500, 1000)
+        num_points = np.random.randint(75, 100)
         noise = np.random.normal(0, 0.5, (num_points, 2))
         lam1 = np.random.uniform(1, 1.25, num_points)
         lam2 = np.random.uniform(1, 1.25, num_points)

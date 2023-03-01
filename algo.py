@@ -38,9 +38,17 @@ def exhaustive_search(P, iters=1000):
     """
     min_sum = np.inf
     min_polygon = None
-    for i in tqdm(range(iters)):
+    for i in range(iters):
         sample = P.get_sample_of_points(P.parameters_config.k)
-        convex_hull = ConvexHull(sample.points)
+        try:
+            convex_hull = ConvexHull(sample.points)
+        except:
+            i -= 1
+            continue
+
+        if len(convex_hull.points) != P.parameters_config.k:
+            i -= 1
+            continue
         sum_ = computeCost(P, convex_hull)
         # compute distance of each point to polygon
         if sum_ < min_sum:
