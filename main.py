@@ -10,8 +10,8 @@ def main():
     data = polygon_data(params.k, is_debug=True)
     P = SetOfPoints(data, parameters_config=params)
     sizes = np.linspace(20, 200, 10, dtype=int)
-    test = Test(P, 10, sizes)
-    test.testUniformSampling()
+    test = Test(P, 24, sizes)
+    test.testUniformSampling(plot=True)
 
 
 

@@ -1,5 +1,6 @@
 import numpy as np
-from scipy.spatial import ConvexHull
+import matplotlib.pyplot as plt
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from tqdm import tqdm
 
 
@@ -23,12 +24,12 @@ def dist_to_polygon(P, p, polygon):
 
 def computeCost(P, polygon):
     sum_ = 0
-    for p in P.points:
-        sum_ += dist_to_polygon(P, p, polygon)
+    for p, w in zip(P.points, P.weights):
+        sum_ += w * dist_to_polygon(P, p, polygon)
     return sum_
 
 
-def exhaustive_search(P, iters=1000):
+def exhaustive_search(P, iters=1000, plot=False):
     """
     Args:
         P: SetofPoints
@@ -54,5 +55,10 @@ def exhaustive_search(P, iters=1000):
         if sum_ < min_sum:
             min_sum = sum_
             min_polygon = convex_hull
+
+    if plot:
+        convex_hull_plot_2d(min_polygon)
+        plt.scatter(P.points[:, 0], P.points[:, 1])
+        plt.show()
 
     return min_polygon, min_sum

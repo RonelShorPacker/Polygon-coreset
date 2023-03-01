@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from coreset import computeSensitivities, sampleCoreset
 from algo import exhaustive_search, computeCost
 from tqdm import tqdm
+from scipy.spatial import convex_hull_plot_2d
 
 class Test:
     def __init__(self, P, iterations, sizes):
@@ -10,16 +11,17 @@ class Test:
         self.iterations = iterations
         self.sizes = sizes
 
-    def testUniformSampling(self):
+    def testUniformSampling(self, plot=False):
         epsilon_array_uniform = np.zeros((self.sizes.shape[0], self.iterations))
         epsilon_array_coreset = np.zeros((self.sizes.shape[0], self.iterations))
         print("Finding Optimal Polygon")
-        opt, opt_cost = exhaustive_search(self.P)
+        opt, opt_cost = exhaustive_search(self.P, plot=True)
         print("Finished finding Optimal Polygon")
         P_S = computeSensitivities(self.P)
         for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
+            print(f'Testing size {size}')
             P_S.parameters_config.coreset_size = size
-            for j in range(self.iterations):
+            for j in tqdm(range(self.iterations)):
                 uniform_sample = P_S.get_sample_of_points(size)
                 C = sampleCoreset(P_S)
                 polygon_uniform, _ = exhaustive_search(uniform_sample)
@@ -35,6 +37,7 @@ class Test:
         max_epsilon_array_coreset = np.max(epsilon_array_coreset, axis=1)
         min_epsilon_array_coreset = np.min(epsilon_array_coreset, axis=1)
         mean_epsilon_array_coreset = np.mean(epsilon_array_coreset, axis=1)
+
 
         plt.title("Coreset vs Optimum")
         plt.xlabel("Coreset size")
