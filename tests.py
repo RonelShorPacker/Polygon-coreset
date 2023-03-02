@@ -4,6 +4,7 @@ from coreset import computeSensitivities, sampleCoreset
 from algo import exhaustive_search, computeCost
 from tqdm import tqdm
 from scipy.spatial import convex_hull_plot_2d
+import pickle
 
 class Test:
     def __init__(self, P, iterations, sizes):
@@ -15,21 +16,30 @@ class Test:
         epsilon_array_uniform = np.zeros((self.sizes.shape[0], self.iterations))
         epsilon_array_coreset = np.zeros((self.sizes.shape[0], self.iterations))
         print("Finding Optimal Polygon")
-        opt, opt_cost = exhaustive_search(self.P, plot=True)
+        with open('opt.p', 'rb') as handle:
+            opt = pickle.load(handle)
+        opt_cost = computeCost(self.P, opt)
+        # opt, opt_cost = exhaustive_search(self.P, iters=10000, plot=True)
+        # with open('opt.p', 'wb') as handle:
+        #     pickle.dump(opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
         print("Finished finding Optimal Polygon")
         P_S = computeSensitivities(self.P)
         for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
             print(f'Testing size {size}')
             P_S.parameters_config.coreset_size = size
             for j in tqdm(range(self.iterations)):
-                uniform_sample = P_S.get_sample_of_points(size)
-                C = sampleCoreset(P_S)
+                uniform_sample = self.P.get_sample_of_points(size)
+                C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 polygon_uniform, _ = exhaustive_search(uniform_sample)
                 polygon_coreset, _ = exhaustive_search(C)
-                cost_uniform = computeCost(P_S, polygon_uniform)
-                cost_coreset = computeCost(P_S, polygon_coreset)
-                epsilon_array_uniform[i][j] = self.computeEpsilon(opt_cost, cost_uniform)
-                epsilon_array_coreset[i][j] = self.computeEpsilon(opt_cost, cost_coreset)
+                cost_uniform = computeCost(uniform_sample, polygon_uniform)
+                cost_coreset = computeCost(C, polygon_coreset)
+                cost_opt_uniform = computeCost(self.P, polygon_uniform)
+                cost_opt_coreset = computeCost(self.P, polygon_coreset)
+                epsilon_array_uniform[i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
+                epsilon_array_coreset[i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
+            print(f'uniform = {epsilon_array_uniform[i].mean()}')
+            print(f'coreset = {epsilon_array_coreset[i].mean()}')
 
         max_epsilon_array_uniform = np.max(epsilon_array_uniform, axis=1)
         min_epsilon_array_uniform = np.min(epsilon_array_uniform, axis=1)
@@ -39,7 +49,7 @@ class Test:
         mean_epsilon_array_coreset = np.mean(epsilon_array_coreset, axis=1)
 
 
-        plt.title("Coreset vs Optimum")
+        plt.title("Coreset vs Uniform")
         plt.xlabel("Coreset size")
         plt.ylabel("Epsilon")
         plt.plot(self.sizes, mean_epsilon_array_uniform, label="Uniform")
@@ -52,13 +62,14 @@ class Test:
         epsilon_array = np.zeros((self.sizes.shape[0], self.iterations))
         print("Finding Optimal Polygon")
         opt, opt_cost = exhaustive_search(self.P, 10)
+
         print("Found Optimal Polygon")
         P_S = computeSensitivities(self.P)
 
         for i, size in tqdm(enumerate(self.sizes), desc=f'Testing'):
             P_S.parameters_config.coreset_size = size
             for j in range(self.iterations):
-                C = sampleCoreset(P_S)
+                C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 C_opt, _ = exhaustive_search(C)
                 polygon_coreset, _ = exhaustive_search(C)
                 cost_coreset = computeCost(P_S, polygon_coreset)
@@ -76,6 +87,6 @@ class Test:
         plt.show()
 
     def computeEpsilon(self, opt_cost, coreset_cost):
-        return np.abs((opt_cost - coreset_cost)/(opt_cost))
+        return np.abs((opt_cost - coreset_cost))/(opt_cost)
 
 

@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from tqdm import tqdm
+from coreset import sampleCoreset
 
 
 def min_distance(pt1, pt2, p):
@@ -39,22 +40,23 @@ def exhaustive_search(P, iters=1000, plot=False):
     """
     min_sum = np.inf
     min_polygon = None
-    for i in range(iters):
-        sample = P.get_sample_of_points(P.parameters_config.k)
+    count = 0
+    while count < iters:
+        sample = sampleCoreset(P, P.parameters_config.k)#P.get_sample_of_points(P.parameters_config.k)
         try:
             convex_hull = ConvexHull(sample.points)
         except:
-            i -= 1
             continue
 
         if len(convex_hull.points) != P.parameters_config.k:
-            i -= 1
             continue
+
         sum_ = computeCost(P, convex_hull)
         # compute distance of each point to polygon
         if sum_ < min_sum:
             min_sum = sum_
             min_polygon = convex_hull
+        count += 1
 
     if plot:
         convex_hull_plot_2d(min_polygon)

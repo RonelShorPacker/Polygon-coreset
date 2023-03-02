@@ -3,9 +3,9 @@ from set_of_points import SetOfPoints
 from Bi_criteria import computeBicriteria, clusterIdxsBasedOnKSubspaces, applyBiCriteria
 
 
-def sampleCoreset(P):
+def sampleCoreset(P, sample_size):
     probs = P.get_probabbilites().reshape(1, -1)[0]
-    indices_sample = np.random.choice(np.arange(P.get_size()), P.parameters_config.coreset_size, True, probs.astype(float))
+    indices_sample = np.random.choice(np.arange(P.get_size()), sample_size, True, probs.astype(float))
     A = P.points[indices_sample]
     v = P.weights[indices_sample].reshape(1, -1)[0]
     s = P.sensitivities[indices_sample].reshape(1, -1)[0]
