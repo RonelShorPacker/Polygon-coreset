@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from set_of_points import SetOfPoints
 from tests import Test
 from parameters_config import ParameterConfig
@@ -12,11 +13,13 @@ def main():
     #     pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
     with open('data.p', 'rb') as handle:
         data = pickle.load(handle)
+    plt.scatter(data[:, 0], data[:, 1])
+    plt.show()
     P = SetOfPoints(data, parameters_config=params)
-    sizes = np.linspace(20, 400, 15, dtype=int)
-    test = Test(P, 5, sizes)
-    test.testUniformSampling(plot=True)
-
+    sizes = np.linspace(300, 400, 15, dtype=int)
+    test = Test(P, 32, sizes)
+    #test.testUniformSampling(plot=True)
+    test.testWeights()
 
 
 

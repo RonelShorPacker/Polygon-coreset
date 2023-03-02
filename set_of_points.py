@@ -938,11 +938,13 @@ class SetOfPoints:
         cluster_WKmeans = self.coreset_return_sensitivities(self, self.parameters_config.k,
                                                          self.parameters_config.coreset_size)
         idx_sort = self.sortOnSubspace()
+
         S = np.maximum.reduce([con1(idx_sort), con2(idx_sort, self.get_size()), np.squeeze(
             cluster_WKmeans.sensitivities) if cluster_WKmeans.get_size() > 1 else cluster_WKmeans.sensitivities])
+        # plt.scatter(self.points[:, 0], self.points[:, 1])
+        # plt.show()
         return S
-        # cluster_WKmeans.sensitivities = S
-        # return cluster_WKmeans
+
 
     #########################################################
 
@@ -962,7 +964,9 @@ class SetOfPoints:
         else:
             v = self.points[0] - self.points[1]
             I = np.apply_along_axis(lambda x: np.dot(x, v), axis=1, arr=self.points)
-            return np.argsort(I) + 1
+            y = np.zeros_like(I)
+            y[np.argsort(I)] = np.arange(I.shape[0]) + 1
+            return y
 
     #########################################################
     def recursive_robust_median(self, P, k, median_sample_size, recursive_median_closest_to_median_rate):

@@ -42,7 +42,7 @@ def exhaustive_search(P, iters=1000, plot=False):
     min_polygon = None
     count = 0
     while count < iters:
-        sample = sampleCoreset(P, P.parameters_config.k)#P.get_sample_of_points(P.parameters_config.k)
+        sample = sampleCoreset(P, P.parameters_config.k)
         try:
             convex_hull = ConvexHull(sample.points)
         except:

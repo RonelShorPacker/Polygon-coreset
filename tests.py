@@ -28,7 +28,8 @@ class Test:
             print(f'Testing size {size}')
             P_S.parameters_config.coreset_size = size
             for j in tqdm(range(self.iterations)):
-                uniform_sample = self.P.get_sample_of_points(size)
+                uniform_sample = P_S.get_sample_of_points(size)
+                uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 polygon_uniform, _ = exhaustive_search(uniform_sample)
                 polygon_coreset, _ = exhaustive_search(C)
@@ -90,3 +91,23 @@ class Test:
         return np.abs((opt_cost - coreset_cost))/(opt_cost)
 
 
+    def testWeights(self):
+        epsilon_array_weights = np.zeros((self.sizes.shape[0], self.iterations))
+
+        P_S = computeSensitivities(self.P)
+
+        for i, size in tqdm(enumerate(self.sizes), desc=f'Testing'):
+            P_S.parameters_config.coreset_size = size
+            for j in range(self.iterations):
+                C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
+                epsilon_array_weights[i][j] = self.computeEpsilon(self.P.get_size(), C.weights.sum())
+
+        mean_epsilon_array_coreset = np.mean(epsilon_array_weights, axis=1)
+
+        plt.title("Weights")
+        plt.xlabel("Coreset size")
+        plt.ylabel("Epsilon")
+        plt.plot(self.sizes, mean_epsilon_array_coreset, label="sum of weights")
+        plt.legend()
+        plt.grid()
+        plt.show()
