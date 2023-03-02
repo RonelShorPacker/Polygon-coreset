@@ -10,7 +10,7 @@ def sampleCoreset(P, sample_size):
     A = P.points[indices_sample]
     v = P.weights[indices_sample].reshape(1, -1)[0]
     s = P.sensitivities[indices_sample].reshape(1, -1)[0]
-    return SetOfPoints(A, v, s)
+    return SetOfPoints(A, v, s, parameters_config=P.parameters_config)
 
 def computeSensitivities(P):
     """
@@ -26,9 +26,9 @@ def computeSensitivities(P):
     indices = clusterIdxsBasedOnKSubspaces(P.points, B)
     P_proj = applyBiCriteria(P, B, indices)
 
-    for i in range(len(P_proj)):
-        plt.scatter(P_proj[i][0].points[:, 0], P_proj[i][0].points[:, 1])
-    plt.show()
+    # for i in range(len(P_proj)):
+    #     plt.scatter(P_proj[i][0].points[:, 0], P_proj[i][0].points[:, 1])
+    # plt.show()
 
     P_S = SetOfPoints(parameters_config=P.parameters_config)
 

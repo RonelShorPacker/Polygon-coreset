@@ -23,10 +23,10 @@ class Test:
         # with open('opt.p', 'wb') as handle:
         #     pickle.dump(opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
         print("Finished finding Optimal Polygon")
-        P_S = computeSensitivities(self.P)
         for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
             print(f'Testing size {size}')
-            P_S.parameters_config.coreset_size = size
+            self.P.parameters_config.coreset_size = size
+            P_S = computeSensitivities(self.P)
             for j in tqdm(range(self.iterations)):
                 uniform_sample = P_S.get_sample_of_points(size)
                 uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
@@ -94,14 +94,13 @@ class Test:
     def testWeights(self):
         epsilon_array_weights = np.zeros((self.sizes.shape[0], self.iterations))
 
-        P_S = computeSensitivities(self.P)
 
         for i, size in tqdm(enumerate(self.sizes), desc=f'Testing'):
-            P_S.parameters_config.coreset_size = size
+            self.P.parameters_config.coreset_size = size
+            P_S = computeSensitivities(self.P)
             for j in range(self.iterations):
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 epsilon_array_weights[i][j] = self.computeEpsilon(self.P.get_size(), C.weights.sum())
-
         mean_epsilon_array_coreset = np.mean(epsilon_array_weights, axis=1)
 
         plt.title("Weights")

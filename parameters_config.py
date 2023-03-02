@@ -27,7 +27,6 @@ class ParameterConfig:
         # rectangles coreset - see paper
         self.minimum_points = 6
         self.sample_size = 7
-        self.core_set_size = 100
         self.alpha = 2
         self.rho = 2
         self.gamma = 0.5

@@ -16,10 +16,10 @@ def main():
     plt.scatter(data[:, 0], data[:, 1])
     plt.show()
     P = SetOfPoints(data, parameters_config=params)
-    sizes = np.linspace(300, 400, 15, dtype=int)
-    test = Test(P, 32, sizes)
-    #test.testUniformSampling(plot=True)
-    test.testWeights()
+    sizes = np.linspace(20, 160, 7, dtype=int, endpoint=False)
+    test = Test(P, 5, sizes)
+    test.testUniformSampling(plot=True)
+    # test.testWeights()
 
 
 
