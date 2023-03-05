@@ -8,19 +8,19 @@ import pickle
 def main():
     params = ParameterConfig()
     # create data
-    # data = polygon_data(params.k, is_debug=True)
+    data = polygon_data(params.k, is_debug=True)
     # with open('data.p', 'wb') as handle:
     #     pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    with open('data.p', 'rb') as handle:
-        data = pickle.load(handle)
+    # with open('data.p', 'rb') as handle:
+    #     data = pickle.load(handle)
     plt.scatter(data[:, 0], data[:, 1])
     plt.show()
     P = SetOfPoints(data, parameters_config=params)
     sizes = np.linspace(20, 160, 7, dtype=int, endpoint=False)
-    test = Test(P, 5, sizes)
-    test.testUniformSampling(plot=True)
+    test = Test(P, 32, sizes)
+    # test.testUniformSampling(plot=True)
     # test.testWeights()
-
+    test.testCoreset()
 
 
 if __name__ == "__main__":

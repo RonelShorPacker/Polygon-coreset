@@ -64,7 +64,7 @@ def computeCost(P, polygon):
     return sum_
 
 
-def exhaustive_search(P, iters=1000, plot=False):
+def exhaustive_search(P, iters=10000, plot=False):
     """
     Args:
         P: SetofPoints

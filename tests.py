@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from coreset import computeSensitivities, sampleCoreset
 from algo import exhaustive_search, computeCost, computeCostToPolygon
 from tqdm import tqdm
-from scipy.spatial import convex_hull_plot_2d
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
 import pickle
 
 class Test:
@@ -18,7 +18,7 @@ class Test:
         print("Finding Optimal Polygon")
         with open('opt.p', 'rb') as handle:
             opt = pickle.load(handle)
-        opt_cost = computeCost(self.P, opt)
+        opt_cost = computeCostToPolygon(self.P, opt)
         # opt, opt_cost = exhaustive_search(self.P, iters=10000, plot=True)
         # with open('opt.p', 'wb') as handle:
         #     pickle.dump(opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -114,3 +114,61 @@ class Test:
         plt.legend()
         plt.grid()
         plt.show()
+
+    def testCoreset(self):
+        print("Sampling Polygons")
+        polygons = self.samplePolygons(10)
+        print("Finished sampling Polygons")
+
+        epsilon_array_uniform = np.zeros((len(polygons), self.sizes.shape[0], self.iterations))
+        epsilon_array_coreset = np.zeros((len(polygons), self.sizes.shape[0], self.iterations))
+
+        for l, polygon in enumerate(polygons):
+            for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
+                print(f'Testing size {size}')
+                self.P.parameters_config.coreset_size = size
+                P_S = computeSensitivities(self.P)
+                for j in tqdm(range(self.iterations)):
+                    uniform_sample = P_S.get_sample_of_points(size)
+                    uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
+                    C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
+                    cost_uniform = computeCostToPolygon(uniform_sample, polygon)
+                    cost_coreset = computeCostToPolygon(C, polygon)
+                    cost_opt_uniform = computeCostToPolygon(self.P, polygon)
+                    cost_opt_coreset = computeCostToPolygon(self.P, polygon)
+                    epsilon_array_uniform[l][i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
+                    epsilon_array_coreset[l][i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
+
+            max_epsilon_array_uniform = np.max(epsilon_array_uniform[l], axis=1)
+            min_epsilon_array_uniform = np.min(epsilon_array_uniform[l], axis=1)
+            mean_epsilon_array_uniform = np.mean(epsilon_array_uniform[l], axis=1)
+            max_epsilon_array_coreset = np.max(epsilon_array_coreset[l], axis=1)
+            min_epsilon_array_coreset = np.min(epsilon_array_coreset[l], axis=1)
+            mean_epsilon_array_coreset = np.mean(epsilon_array_coreset[l], axis=1)
+
+            plt.title("Coreset vs Uniform, Random Polygon")
+            plt.xlabel("Coreset size")
+            plt.ylabel("Epsilon")
+            plt.plot(self.sizes, mean_epsilon_array_uniform, label="Uniform")
+            plt.plot(self.sizes, mean_epsilon_array_coreset, label="Coreset")
+            plt.legend()
+            plt.grid()
+            plt.show()
+
+
+    def samplePolygons(self, num):
+        polygons = []
+        count = 0
+        while count < num:
+            sample = sampleCoreset(self.P, self.P.parameters_config.k)
+            try:
+                convex_hull = ConvexHull(sample.points)
+            except:
+                continue
+
+            if len(convex_hull.vertices) != self.P.parameters_config.k:
+                continue
+
+            polygons.append(convex_hull)
+            count += 1
+        return polygons
