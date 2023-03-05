@@ -4,7 +4,7 @@ class ParameterConfig:
         # main parameters
         self.header_indexes = None
         self.dim = 2
-        self.k = 6
+        self.k = 8
         self.coreset_size = 100
 
         # experiment  parameters

@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from coreset import computeSensitivities, sampleCoreset
-from algo import exhaustive_search, computeCost
+from algo import exhaustive_search, computeCost, computeCostToPolygon
 from tqdm import tqdm
 from scipy.spatial import convex_hull_plot_2d
 import pickle
@@ -33,10 +33,14 @@ class Test:
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 polygon_uniform, _ = exhaustive_search(uniform_sample)
                 polygon_coreset, _ = exhaustive_search(C)
-                cost_uniform = computeCost(uniform_sample, polygon_uniform)
-                cost_coreset = computeCost(C, polygon_coreset)
-                cost_opt_uniform = computeCost(self.P, polygon_uniform)
-                cost_opt_coreset = computeCost(self.P, polygon_coreset)
+                # cost_uniform = computeCost(uniform_sample, polygon_uniform)
+                # cost_coreset = computeCost(C, polygon_coreset)
+                # cost_opt_uniform = computeCost(self.P, polygon_uniform)
+                # cost_opt_coreset = computeCost(self.P, polygon_coreset)
+                cost_uniform = computeCostToPolygon(uniform_sample, polygon_uniform)
+                cost_coreset = computeCostToPolygon(C, polygon_coreset)
+                cost_opt_uniform = computeCostToPolygon(self.P, polygon_uniform)
+                cost_opt_coreset = computeCostToPolygon(self.P, polygon_coreset)
                 epsilon_array_uniform[i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
                 epsilon_array_coreset[i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
             print(f'uniform = {epsilon_array_uniform[i].mean()}')
