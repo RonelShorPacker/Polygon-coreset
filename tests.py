@@ -16,33 +16,39 @@ class Test:
         epsilon_array_uniform = np.zeros((self.sizes.shape[0], self.iterations))
         epsilon_array_coreset = np.zeros((self.sizes.shape[0], self.iterations))
         print("Finding Optimal Polygon")
-        with open('opt.p', 'rb') as handle:
-            opt = pickle.load(handle)
-        opt_cost = computeCostToPolygon(self.P, opt)
-        # opt, opt_cost = exhaustive_search(self.P, iters=10000, plot=True)
+        # with open('opt.p', 'rb') as handle:
+        #     opt = pickle.load(handle)
+        # opt_cost = computeCostToPolygon(self.P, opt)
+        opt, opt_cost = exhaustive_search(self.P, iters=1000, plot=True)
         # with open('opt.p', 'wb') as handle:
         #     pickle.dump(opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        P_S = computeSensitivities(self.P)
         print("Finished finding Optimal Polygon")
         for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
             print(f'Testing size {size}')
-            self.P.parameters_config.coreset_size = size
-            P_S = computeSensitivities(self.P)
+            P_S.parameters_config.coreset_size = size
+
+            P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
             for j in tqdm(range(self.iterations)):
                 uniform_sample = P_S.get_sample_of_points(size)
                 uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
-                polygon_uniform, _ = exhaustive_search(uniform_sample)
+                polygon_uniform, _ = exhaustive_search(uniform_sample, tmp='uniform')
                 polygon_coreset, _ = exhaustive_search(C)
-                # cost_uniform = computeCost(uniform_sample, polygon_uniform)
-                # cost_coreset = computeCost(C, polygon_coreset)
-                # cost_opt_uniform = computeCost(self.P, polygon_uniform)
-                # cost_opt_coreset = computeCost(self.P, polygon_coreset)
-                cost_uniform = computeCostToPolygon(uniform_sample, polygon_uniform)
-                cost_coreset = computeCostToPolygon(C, polygon_coreset)
+                # cost_uniform = computeCostToPolygon(uniform_sample, polygon_uniform)
+                # cost_coreset = computeCostToPolygon(C, polygon_coreset)
+                # cost_opt_uniform = computeCostToPolygon(self.P, polygon_uniform)
+                # cost_opt_coreset = computeCostToPolygon(self.P, polygon_coreset)
                 cost_opt_uniform = computeCostToPolygon(self.P, polygon_uniform)
                 cost_opt_coreset = computeCostToPolygon(self.P, polygon_coreset)
-                epsilon_array_uniform[i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
-                epsilon_array_coreset[i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
+                epsilon_array_uniform[i][j] = self.computeEpsilon(opt_cost, cost_opt_uniform)
+                epsilon_array_coreset[i][j] = self.computeEpsilon(opt_cost, cost_opt_coreset)
+                # cost_uniform = computeCostToPolygon(uniform_sample, polygon_uniform)
+                # cost_coreset = computeCostToPolygon(C, polygon_coreset)
+                # cost_opt_uniform = computeCostToPolygon(self.P, polygon_uniform)
+                # cost_opt_coreset = computeCostToPolygon(self.P, polygon_coreset)
+                # epsilon_array_uniform[i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
+                # epsilon_array_coreset[i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
             print(f'uniform = {epsilon_array_uniform[i].mean()}')
             print(f'coreset = {epsilon_array_coreset[i].mean()}')
 
@@ -74,6 +80,7 @@ class Test:
         for i, size in tqdm(enumerate(self.sizes), desc=f'Testing'):
             P_S.parameters_config.coreset_size = size
             for j in range(self.iterations):
+                P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
                 C_opt, _ = exhaustive_search(C)
                 polygon_coreset, _ = exhaustive_search(C)
@@ -98,13 +105,13 @@ class Test:
     def testWeights(self):
         epsilon_array_weights = np.zeros((self.sizes.shape[0], self.iterations))
 
-
+        P_S = computeSensitivities(self.P)
         for i, size in tqdm(enumerate(self.sizes), desc=f'Testing'):
-            self.P.parameters_config.coreset_size = size
-            P_S = computeSensitivities(self.P)
+            P_S.parameters_config.coreset_size = size
+            P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
             for j in range(self.iterations):
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
-                epsilon_array_weights[i][j] = self.computeEpsilon(self.P.get_size(), C.weights.sum())
+                epsilon_array_weights[i][j] = self.computeEpsilon(P_S.get_size(), C.weights.sum())
         mean_epsilon_array_coreset = np.mean(epsilon_array_weights, axis=1)
 
         plt.title("Weights")
@@ -116,22 +123,28 @@ class Test:
         plt.show()
 
     def testCoreset(self):
+        epsilon_array_uniform = np.zeros((10, self.sizes.shape[0], self.iterations))
+        epsilon_array_coreset = np.zeros((10, self.sizes.shape[0], self.iterations))
+
+        P_S = computeSensitivities(self.P)
         print("Sampling Polygons")
-        polygons = self.samplePolygons(10)
+        polygons = self.samplePolygons(P_S, 10)
         print("Finished sampling Polygons")
-
-        epsilon_array_uniform = np.zeros((len(polygons), self.sizes.shape[0], self.iterations))
-        epsilon_array_coreset = np.zeros((len(polygons), self.sizes.shape[0], self.iterations))
-
         for l, polygon in enumerate(polygons):
             for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
                 print(f'Testing size {size}')
-                self.P.parameters_config.coreset_size = size
-                P_S = computeSensitivities(self.P)
+                P_S.parameters_config.coreset_size = size
+                P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
                 for j in tqdm(range(self.iterations)):
                     uniform_sample = P_S.get_sample_of_points(size)
                     uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
                     C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
+                    plt.scatter(P_S.points[:, 0], P_S.points[:, 1], color='blue')
+                    plt.scatter(uniform_sample.points[:, 0], uniform_sample.points[:, 1], color='red')
+                    plt.scatter(C.points[:, 0], C.points[:, 1], color='green')
+                    plt.legend(['data', 'uniform', 'coreset'])
+                    # plt.show()
+                    plt.savefig(f'tmp/plot_size_{size}_{j}.jpg')
                     cost_uniform = computeCostToPolygon(uniform_sample, polygon)
                     cost_coreset = computeCostToPolygon(C, polygon)
                     cost_opt_uniform = computeCostToPolygon(self.P, polygon)
@@ -156,11 +169,11 @@ class Test:
             plt.show()
 
 
-    def samplePolygons(self, num):
+    def samplePolygons(self, P_S, num):
         polygons = []
         count = 0
         while count < num:
-            sample = sampleCoreset(self.P, self.P.parameters_config.k)
+            sample = sampleCoreset(P_S, P_S.parameters_config.k)
             try:
                 convex_hull = ConvexHull(sample.points)
             except:
@@ -170,5 +183,8 @@ class Test:
                 continue
 
             polygons.append(convex_hull)
+            plt.scatter(P_S.points[:, 0], P_S.points[:, 1])
+            plt.plot(convex_hull.points[convex_hull.vertices, 0], convex_hull.points[convex_hull.vertices, 1], 'r--', lw=2)
+            plt.show()
             count += 1
         return polygons

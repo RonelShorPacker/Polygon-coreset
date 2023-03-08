@@ -567,7 +567,8 @@ class SetOfPoints:
 
         assert self.get_size() > 0, "set is empty"
 
-        numerator = self.weights.reshape(-1,1) * T #np.ones((self.get_size(), 1), dtype=np.float) * T
+        # numerator = self.weights.reshape(-1,1) * T #np.ones((self.get_size(), 1), dtype=np.float) * T
+        numerator = np.ones_like(self.sensitivities) * T #np.ones((self.get_size(), 1), dtype=np.float) * T
         denominator = self.sensitivities * m
         new_weights = numerator / denominator
 
@@ -602,12 +603,13 @@ class SetOfPoints:
         assert self.get_size() > 0, "set is empty"
 
         size = self.get_size()
-        sensitivities1 = np.ones((self.get_size(), 1), dtype=np.float) * ((1*k)/size)
+        sensitivities1 = np.ones((self.get_size(), 1), dtype=np.float) * k * 1.5 / size# ((2*k ** 2 / np.log(self.get_size()))/size)
 
-        sorted_indices = np.expand_dims(np.argsort(self.points[:, 0]).astype(np.float) + 1, axis=1)
-        sensitivities2 = np.reciprocal(sorted_indices)
-        sensitivities3 = np.reciprocal(np.subtract((self.get_size() + 1) * np.ones((self.get_size(), 1)), sorted_indices))
-        self.sensitivities = np.maximum(sensitivities1, np.maximum(sensitivities2, sensitivities3))
+        self.sensitivities = sensitivities1
+        # sorted_indices = np.expand_dims(np.argsort(self.points[:, 0]).astype(np.float) + 1, axis=1)
+        # sensitivities2 = np.reciprocal(sorted_indices)
+        # sensitivities3 = np.reciprocal(np.subtract((self.get_size() + 1) * np.ones((self.get_size(), 1)), sorted_indices))
+        # self.sensitivities = np.maximum(sensitivities1, np.maximum(sensitivities2, sensitivities3))
 
     #########################################################################
 
@@ -926,8 +928,8 @@ class SetOfPoints:
         if Q.get_size() > 0:
             Q.set_all_sensitivities(max_sensitivity * max_sensitivity_multiply_factor) # here we set the sensitivities of the points who left to the highest - since they are outliers with a very high probability
             temp_set.add_set_of_points(Q) #and now temp_set is all the points we began with - just with updated sensitivities
-        T = temp_set.get_sum_of_sensitivities()
-        temp_set.set_weights(T, m) #sets the weights as described in line 10 in main alg
+        # T = temp_set.get_sum_of_sensitivities()
+        # temp_set.set_weights(T, m) #sets the weights as described in line 10 in main alg
         #temp_set.sort_by_indexes() #change this line in tests for sensativities bound
         return temp_set#temp_set.sensitivities, temp_set.weights
 

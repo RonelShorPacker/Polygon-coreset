@@ -10,7 +10,7 @@ def sampleCoreset(P, sample_size):
     A = P.points[indices_sample]
     v = P.weights[indices_sample].reshape(1, -1)[0]
     s = P.sensitivities[indices_sample].reshape(1, -1)[0]
-    return SetOfPoints(A, v, s, parameters_config=P.parameters_config)
+    return SetOfPoints(A, v, s, indexes=indices_sample, parameters_config=P.parameters_config)
 
 def computeSensitivities(P):
     """
@@ -38,6 +38,5 @@ def computeSensitivities(P):
         orig_P = P.get_points_from_indices(cluster.indexes).points
         tmp = SetOfPoints(P=orig_P, sen=sen, indexes=cluster.indexes)
         P_S.add_set_of_points(tmp)
-    P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
 
     return P_S

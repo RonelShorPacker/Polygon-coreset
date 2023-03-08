@@ -64,7 +64,7 @@ def computeCost(P, polygon):
     return sum_
 
 
-def exhaustive_search(P, iters=10000, plot=False):
+def exhaustive_search(P, iters=1000, plot=False, tmp='coreset'):
     """
     Args:
         P: SetofPoints
@@ -85,7 +85,6 @@ def exhaustive_search(P, iters=10000, plot=False):
 
         if len(convex_hull.vertices) != P.parameters_config.k:
             continue
-
         # sum_ = computeCost(P, convex_hull)
         sum_ = computeCostToPolygon(P, convex_hull)
         # compute distance of each point to polygon
@@ -96,6 +95,7 @@ def exhaustive_search(P, iters=10000, plot=False):
     if plot:
         convex_hull_plot_2d(min_polygon)
         plt.scatter(P.points[:, 0], P.points[:, 1])
+        plt.savefig(f'tmp/plot_size_{P.get_size()}_{np.random.uniform(0, 10000)}_{tmp}.jpg')
         plt.show()
 
     return min_polygon, min_sum
