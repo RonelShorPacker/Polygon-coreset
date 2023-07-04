@@ -1,0 +1,1364 @@
+from __future__ import division
+from numpy import zeros, savetxt
+import sys
+from sklearn.decomposition import TruncatedSVD
+from scipy.linalg import null_space
+import copy
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class ParameterConfig:
+    def __init__(self):
+        # main parameters
+        self.header_indexes = None
+        self.dim = 2
+        self.k = 4
+        self.coreset_size = 100
+
+        # experiment  parameters
+        self.sample_sizes = None
+        self.inner_iterations = None
+        self.centers_number = None
+        self.outliers_trashold_value = None
+
+        # EM k means for lines estimator parameters
+        self.multiplications_of_k = None
+        self.EM_iteration_test_multiplications = None
+
+        # EM k means for points estimator parameters
+        self.ground_true_iterations_number_ractor = None
+
+        # k means for lines coreset parameters
+        self.inner_a_b_approx_iterations = None
+        self.sample_rate_for_a_b_approx = None
+
+        # rectangles coreset - see paper
+        self.minimum_points = 6
+        self.sample_size = 7
+        self.alpha = 2
+        self.rho = 2
+        self.gamma = 0.5
+        self.lam = 1
+        #distance function
+        self.est = np.infty
+        # weighted centers coreset parameters
+        self.median_sample_size = 20
+        self.closest_to_median_rate = 0.5
+        self.number_of_remains_multiply_factor = 1 - 0.05 / (2 * self.k)
+        self.max_sensitivity_multiply_factor = 1
+
+        # iterations
+        self.RANSAC_iterations = None
+        self.coreset_iterations = None
+        self.RANSAC_EM_ITERATIONS = None
+        self.coreset_to_ransac_time_rate = None
+        self.iterations_median = 4
+        self.exhaustive_search = 1000
+
+        # files
+        self.input_points_file_name = None
+
+        #missing entries parameters
+        self.missing_entries_alg = None
+        self.cost_type= None
+        self.KNN_k = None
+
+
+        #data handler parameters
+        self.points_number = None
+        self.output_file_name = None
+
+        # Bi-criteria parameters
+        self.sample_size_bi_criteria = self.k * 2 # k(j+1)
+        self.reduce_each_iteration = 0.5
+        self.fast_bi_criteria = True
+
+
+def clusterIdxsBasedOnKSubspaces(P, B):
+    """
+    This functions partitions the points into clusters a list of flats.
+    :param B: A list of flats
+    :return: A numpy array such each entry contains the index of the flat to which the point which is related to the
+             entry is assigned to.
+    """
+    n = P.shape[0]
+    idxs = np.arange(n)  # a numpy array of indices
+    centers = np.array(B, dtype=tuple)  # a numpy array of the flats # TODO: added the tuple
+
+    dists = np.apply_along_axis(lambda x: computeDistanceToSubspace(P[idxs, :], x[0], x[1]), 1, centers)  # compute the
+                                                                                                # distance between
+                                                                                                # each point and
+                                                                                                # each flat
+    idxs = np.argmin(dists, axis=0)
+
+    return idxs  # return the index of the closest flat to each point in self.P.P
+
+####################################################### Bicriteria #####################################################
+parametrs_config = ParameterConfig()
+LAMBDA = 1
+Z = 2
+M_ESTIMATOR_FUNCS = {
+    'lp': (lambda x: np.abs(x) ** Z / Z),
+    'huber': (lambda x: np.where(np.abs(x) <= LAMBDA, x ** 2 / 2, LAMBDA * (np.abs(x) - LAMBDA / 2))),
+    'cauchy': (lambda x: LAMBDA ** 2 / 2 * np.log(1 + x ** 2 / LAMBDA ** 2)),
+    'geman_McClure': (lambda x: x ** 2 / (2 * (1 + x ** 2))),
+    'welsch': (lambda x: LAMBDA ** 2 / 2 * (1 - np.exp(-x ** 2 / LAMBDA ** 2))),
+    'tukey': (lambda x: np.where(np.abs(x) <= LAMBDA, LAMBDA ** 2 / 6 * (1 - (1 - x ** 2 / LAMBDA ** 2) ** 3),
+                                 LAMBDA**2 / 6)),
+    'L1-2': (lambda x: 2 * (np.sqrt(1 + x ** 2 / 2) - 1)),
+    'fair': (lambda x: LAMBDA ** 2 * (np.abs(x) / LAMBDA - np.log(1 + np.abs(x) / LAMBDA))),
+    'logit': (lambda x: 1.0 / (1 + np.exp(-x))),
+    'relu': (lambda x: np.max(x, 0)),
+    'leaky-relu': (lambda x: x if x > 0 else 0.01 * x)
+}
+
+METHOD = 'L1-2'
+OBJECTIVE_LOSS = M_ESTIMATOR_FUNCS[METHOD]  # the objective function which we want to generate a coreset for
+
+
+####################################################### Bicriteria #####################################################
+
+def computeDistanceToSubspace(point, X, v=None):
+    """
+    This function is responsible for computing the distance between a point and a J dimensional affine subspace.
+    :param point: A numpy array representing a .
+    :param X: A numpy matrix representing a basis for a J dimensional subspace.
+    :param v: A numpy array representing the translation of the subspace from the origin.
+    :return: The distance between the point and the subspace which is spanned by X and translated from the origin by v.
+    """
+    global OBJECTIVE_LOSS
+    if point.ndim > 1:
+        return OBJECTIVE_LOSS(np.linalg.norm(np.dot(point - v[np.newaxis, :], null_space(X)), ord=2, axis=1))
+    return OBJECTIVE_LOSS(np.linalg.norm(np.dot(point-v if v is not None else point, null_space(X))))
+
+def attainClosestPointsToSubspaces(P, W, flats, indices):
+    """
+    This function returns the closest n/2 points among all of the n points to a list of flats.
+    :param flats: A list of flats where each flat is represented by an orthogonal matrix and a translation vector.
+    :param indices: A list of indices of points in self.P.P
+    :return: The function returns the closest n/2 points to flats.
+    """
+    dists = np.empty((P[indices, :].shape[0], ))
+    N = indices.shape[0]
+    if not parametrs_config.fast_bi_criteria:
+        for i in range(N):
+            dists[i] = np.min([
+                computeDistanceToSubspace(P[np.array([indices[i]]), :], flats[j][0], flats[j][1])
+                for j in range(len(flats))])
+
+    else:
+        dists = computeDistanceToSubspace(P[indices, :], flats[0], flats[1])
+        idxs = np.argpartition(dists, N // 2)[:N//2]
+        return idxs.tolist()
+
+    return np.array(indices)[np.argsort(dists).astype(np.int)[:int(N / 2)]].tolist()
+
+
+
+def sortDistancesToSubspace(P, X, v, points_indices):
+    """
+    The function at hand sorts the distances in an ascending order between the points and the flat denoted by (X,v).
+    :param X: An orthogonal matrix which it's span is a subspace.
+    :param v: An numpy array denoting a translation vector.
+    :param points_indices: a numpy array of indices for computing the distance to a subset of the points.
+    :return: sorted distances between the subset points addressed by points_indices and the flat (X,v).
+    """
+    dists = computeDistanceToSubspace(P[points_indices, :], X, v)  # compute the distance between the subset
+                                                                         # of points towards
+                                                                         # the flat which is represented by (X,v)
+    return np.array(points_indices)[np.argsort(dists).astype(np.int)].tolist()  # return sorted distances
+
+
+def computeSubOptimalFlat(P, weights):
+    """
+    This function computes the sub optimal flat with respect to l2^2 loss function, which relied on computing the
+    SVD factorization of the set of the given points, namely P.
+    :param P: A numpy matrix which denotes the set of points.
+    :param weights: A numpy array of weightes with respect to each row (point) in P.
+    :return: A flat which best fits P with respect to the l2^2 loss function.
+    """
+    v = np.average(P, axis=0, weights=weights)  # compute the weighted mean of the points
+    svd = TruncatedSVD(algorithm='randomized', n_iter=1, n_components=1).fit(P-v)
+    V = svd.components_
+    return V, v  # return a flat denoted by an orthogonal matrix and a translation vector
+
+
+
+def addFlats(P, W, S, B):
+    """
+    This function is responsible for computing a set of all possible flats which passes through j+1 points.
+    :param S: list of j+1 subsets of points.
+    :return: None (Add all the aforementioned flats into B).
+    """
+    indices = [np.arange(S[i].shape[0]) for i in range(len(S))]
+
+    points = np.meshgrid(*indices)                    # compute a mesh grid using the duplicated coefs
+    points = np.array([p.flatten() for p in points])  # flatten each point in the meshgrid for computing the
+                                                      # all possible ordered sets of j+1 points
+    idx = len(B)
+    for i in range(points.shape[1]):
+        A = [S[j][points[j, i]][0] for j in range(points.shape[0])]
+        P_sub, W_sub = P[A, :], W[A]
+        B.append(computeSubOptimalFlat(P_sub, W_sub))
+
+    return np.arange(idx, len(B)), B
+
+
+def computeBicriteria(P, W):
+    """
+    The function at hand is an implemetation of Algorithm Approx-k-j-Flats(P, k, j) at the paper
+    "Bi-criteria Linear-time Approximations for Generalized k-Mean/Median/Center". The algorithm returns an
+    (2^j, O(log(n) * (jk)^O(j))-approximation algorithm for the (k,j)-projective clustering problem using the l2^2
+    loss function.
+    :return: A (2^j, O(log(n) * (jk)^O(j)) approximation solution towards the optimal solution.
+    """
+    n = P.shape[0]
+    Q = np.arange(0, n, 1)
+    t = 0
+    B = []
+    tol_sample_size = parametrs_config.k * (1 + 1)
+    sample_size = (lambda t: int(np.ceil(parametrs_config.k * (1 + 1) * (2 + np.log(1 + 1) + np.log(parametrs_config.k) + min(t, np.log(np.log(n)))))))
+
+    while np.size(Q) >= tol_sample_size:  # run we have small set of points
+        S = []
+        for i in range(0, 1+1):  # Sample j + 1 subsets of the points in an i.i.d. fashion
+            random_sample = np.random.choice(Q, size=sample_size(t))
+            S.append(random_sample[:, np.newaxis])
+
+        if not parametrs_config.fast_bi_criteria:
+            a, F = addFlats(P, W, S, B)
+        else:
+            S = np.unique(np.vstack(S).flatten())
+            F = computeSubOptimalFlat(P[S, :], W[S])
+            B.append(F)
+
+        sorted_indices = attainClosestPointsToSubspaces(P, W, F, Q)
+        Q = np.delete(Q, sorted_indices)
+        t += 1
+
+    if not parametrs_config.fast_bi_criteria:
+        _, B = addFlats(P, W, [Q for i in range(1 + 1)], B)
+    else:
+        F = computeSubOptimalFlat(P[Q.flatten(), :], W[Q.flatten()])
+        B.append(F)
+
+    return B
+
+
+def projectPointsToSubspace(P, X, v):
+    return np.dot(P-v if v is not None else P, null_space(X))
+
+
+def applyBiCriteria(P, B, I):
+    clusters = []
+    for i in range(len(B)):
+        F = np.array(B, dtype=tuple) # TODO: added the tuple
+        idx = np.where(I == i)[0]
+        if np.size(idx):
+            P_c = P.get_points_from_indices(idx)
+            P_proj = P_c.project_on_subspace(F[i])
+            clusters.append([P_proj, F])
+        else:
+            continue
+
+    return np.array(clusters, dtype=object)
+
+
+def sampleCoreset(P, sample_size):
+    probs = P.get_probabbilites().reshape(1, -1)[0]
+    indices_sample = np.random.choice(np.arange(P.get_size()), sample_size, True, probs.astype(float))
+    A = P.points[indices_sample]
+    v = P.weights[indices_sample].reshape(1, -1)[0]
+    s = P.sensitivities[indices_sample].reshape(1, -1)[0]
+    return SetOfPoints(A, v, s, indexes=indices_sample, parameters_config=P.parameters_config)
+
+def computeSensitivities(P):
+    """
+    Args:
+        P: SetofPoints
+    Returns: SetofPoints, coreset or np.array, sensitivities
+
+    """
+
+    # computing Bi-criteria
+    B = computeBicriteria(P.points, np.squeeze(P.weights))
+    # Project data to Bi criteria
+    indices = clusterIdxsBasedOnKSubspaces(P.points, B)
+    P_proj = applyBiCriteria(P, B, indices)
+
+    # for i in range(len(P_proj)):
+    #     plt.scatter(P_proj[i][0].points[:, 0], P_proj[i][0].points[:, 1])
+    # plt.show()
+
+    P_S = SetOfPoints(parameters_config=P.parameters_config)
+
+    # compute sensitivity per cluster
+    for cluster in P_proj[:, 0]:
+        sen = cluster.computeSensativities()
+        orig_P = P.get_points_from_indices(cluster.indexes).points
+        tmp = SetOfPoints(P=orig_P, sen=sen, indexes=cluster.indexes)
+        P_S.add_set_of_points(tmp)
+
+    return P_S
+
+
+#################################################################
+#     Corset for Weighted centers of points                     #
+#     Paper: http://people.csail.mit.edu/dannyf/outliers.pdf    #
+#     Implemented by Yair Marom. yairmrm@gmail.com              #
+#################################################################
+
+class SetOfPoints:
+    """
+    Class that represent a set of weighted points in any d>0 dimensional space
+    Attributes:
+        points (ndarray) : The points in the set
+        weights (ndarray) : The weights. weights[i] is the weight of the i-th point
+        dim (integer): The dimension of the points
+    """
+
+    ##################################################################################
+
+    def __init__(self, P=None, w=None, sen=None, indexes = None, parameters_config = None):
+        """
+        C'tor
+        :param P: np.ndarray - set of points
+        :param w: np.ndarray - set of weights
+        :param sen: np.ndarray - set of sensitivities
+        :param parameters_config: class - The parameters we are using
+        """
+        #if (indexes != [] and len(P) == 0) or (indexes == [] and len(P) != 0):
+        #    assert indexes != [] and len(P) != 0, "not indexes == [] and len(P) == 0"
+        if parameters_config:
+            self.parameters_config = parameters_config
+        else:
+            self.parameters_config = ParameterConfig()
+        if P is None:
+            P = []
+        if w is None:
+            w = []
+        if sen is None:
+            sen = []
+        if indexes is None:
+            indexes = []
+
+        size = len(P)
+        if size == 0:  # there is no points in the set we got
+            self.points = []
+            self.weights = []
+            self.sensitivities = []
+            self.dim = 0
+            self.indexes = []
+            return
+        if np.ndim(P) == 1:  # there is only one point in the array
+            Q = []
+            Q.append(P)
+            self.points = np.asarray(Q)
+            if w == []:
+                w = np.ones((1, 1), dtype=np.float)
+            if sen == []:
+                sen = np.ones((1, 1), dtype=np.float)
+            self.weights = w
+            self.sensitivities = sen
+            [_, self.dim] = np.shape(self.points)
+            self.indexes = np.zeros((1, 1), dtype=np.float)
+            return
+        else:
+            self.points = np.asarray(P)
+        [_, self.dim] = np.shape(self.points)
+        if w == []:
+            w = np.ones((size, 1), dtype=float) # TODO: changed from np.float to float
+        if sen == []:
+            sen = np.ones((size, 1), dtype=float) # TODO: changed from np.float to float
+        self.weights = w
+        self.sensitivities = sen
+        if indexes == []:
+            self.indexes = np.asarray(range(len(self.points))).reshape(-1)
+        else:
+            self.indexes = indexes.reshape(-1)
+
+    ##################################################################################
+
+    def get_sample_of_points(self, size_of_sample):
+        """
+        Args:
+            size_of_sample (int) : the sample's size
+
+        Returns:
+            SetOfPoints: sample consist of size_of_sample points from the uniform distribution over the set
+        """
+
+        assert size_of_sample > 0, "size_of_sample <= 0"
+
+        size = self.get_size()
+        if size_of_sample >= size:
+            return self
+        else:
+            all_indices = np.asarray(range(size))
+            sample_indices = np.random.choice(all_indices, size_of_sample).tolist()
+            sample_points = np.take(self.points, sample_indices, axis=0, out=None, mode='raise')
+            sample_weights = np.take(self.weights, sample_indices, axis=0, out=None, mode='raise')
+            sample_indexes = np.take(self.indexes, sample_indices, axis=0, out=None, mode='raise')
+            return SetOfPoints(sample_points, sample_weights,indexes=sample_indexes)
+
+
+    ###################################################################################
+    def get_size(self):
+        """
+        Returns:
+            int: number of points in the set
+        """
+        try:
+            return np.shape(self.points)[0]
+        except:
+            print("a")
+
+    ##################################################################################
+
+    def get_points_from_indices(self, indices):
+        """
+        Args:
+            indices (list of ints) : list of indices.
+
+        Returns:
+            SetOfPoints: a set of point that contains the points in the input indices
+        """
+        if self.get_size() == 0:
+            x=2
+        assert len(indices) > 0, "indices length is zero"
+
+
+        sample_points = self.points[indices]
+        sample_weights = self.weights[indices]
+        sample_indexes = self.indexes[indices]
+
+        return SetOfPoints(sample_points, sample_weights, indexes=sample_indexes, parameters_config=self.parameters_config)
+
+    ##################################################################################
+
+    def project_on_subspace(self, F):
+        """
+        :param F: np.ndarray, represents a subspace
+        :return: SetofPoints: a set of points that contains the projected points on F
+        """
+        Proj = F[0] * F[0].T
+        P_proj = Proj.dot((self.points - F[1]).T).T + F[1]
+        return SetOfPoints(P_proj, self.weights, indexes=self.indexes, parameters_config=self.parameters_config)
+
+    ##################################################################################
+
+    def get_mean(self):
+        """
+        Returns:
+            np.ndarray: the weighted mean of the points in the set
+        """
+
+        size = self.get_size()
+        assert size > 0, "set is empty"
+
+        sum_of_weights = self.get_sum_of_weights()
+        points_mul_weights = sum(np.multiply(self.weights.reshape(-1, 1), self.points)) #self.points[1]*self.weights[1]+self.points[2]*self.weights[2]+...+self.points[n]*self.weights[n]
+        the_mean = points_mul_weights / sum_of_weights #divition by the sum of weights to get a weighted average
+        return the_mean
+
+    ##################################################################################
+
+    def get_sum_of_weights(self):
+        """
+        Returns:
+            float: the sum of wights in the set
+        """
+
+        assert self.get_size() > 0, "No points in the set"
+
+        return np.sum(self.weights)
+
+    ##################################################################################
+
+    def add_set_of_points(self, P):
+        """
+        The method adds a set of weighted points to the set
+        Args:
+            P (SetOfPoints) : a set of points to add to the set
+
+        Returns:
+            ~
+        """
+
+        if P.get_size() == 0:
+            return
+
+        points = P.points
+        weights = P.weights.reshape(-1, 1)
+        try:
+            sensitivities = P.sensitivities.reshape(-1, 1)
+        except:
+            print("a")
+        indexes = P.indexes.reshape(-1)
+
+        size = self.get_size()
+        if size == 0 and self.dim == 0:
+            self.dim = np.shape(points)[1]
+            self.points = points
+            self.weights = weights
+            self.sensitivities = sensitivities
+            self.indexes = indexes
+            return
+
+        self.points = np.append(self.points, points, axis=0)
+        self.weights = np.append(self.weights, weights)
+        self.sensitivities = np.append(self.sensitivities, sensitivities, axis=0)
+        self.indexes = np.append(self.indexes, indexes, axis=0)
+
+
+    ##################################################################################
+
+    def set_all_weights_to_specific_value(self, value):
+        self.weights = np.ones(self.get_size()) * value
+
+    ##################################################################################
+
+    def remove_points_at_indexes(self, start, end):
+        """
+        TODO: complete
+        :param start:
+        :param end:
+        :return:
+        """
+        indexes = np.arange(start, end)
+        self.points = np.delete(self.points, indexes, axis=0)
+        self.weights = np.delete(self.weights, indexes, axis=0)
+        self.sensitivities = np.delete(self.sensitivities, indexes, axis=0)
+        self.indexes = np.delete(self.indexes, indexes, axis=0)
+
+    ##################################################################################
+
+    def remove_from_set(self, C):
+        """
+        The method gets set of points C and remove each point in the set that also in C
+        Args:
+            C (SetOfPoints) : a set of points to remove from the set
+
+        Returns:
+            ~
+        """
+
+        indexes = []
+        C_indexes = C.indexes
+        self_indexes = self.indexes
+        for i in range(len(self_indexes)):
+            index = self_indexes[i]
+            if index in C.indexes:
+                indexes.append(i)
+        #indexes = C.indexes
+        self.points = np.delete(self.points, indexes, axis=0)
+        self.weights = np.delete(self.weights, indexes, axis=0)
+        self.sensitivities = np.delete(self.sensitivities, indexes, axis=0)
+        self.indexes = np.delete(self.indexes, indexes, axis=0)
+
+    ##################################################################################
+
+    def get_sum_of_sensitivities(self):
+        """
+        Returns:
+            float: the sum of the sensitivities of the points in the set
+        """
+
+        assert self.get_size() > 0, "Set is empty"
+
+        return sum(self.sensitivities)
+
+    ##################################################################################
+
+    def get_closest_points_to_point(self, point, m, type):
+        """
+        Args:
+            point (np.ndarray) : d-dimensional point
+            m (int): size of sample - may be percent or fixed number, depends on the parameter 'type'
+            type (str): available values: "by number"/"by rate"
+
+        Returns:
+            SetOfPoints: the points that are closest to the given point, by rate or by
+                         fixed number
+        """
+
+        assert type == "by number" or type == "by rate", "type undefined"
+        if type == "by number":
+            assert m <= self.get_size(), "(1) Number of points in query is larger than number of points in the set"
+        if type == "by rate":
+            assert m >= 0 and m <= 1, "(2) Number of points in query is larger than number of points in the set"
+
+        size = self.get_size()
+
+        #this calculates all the l2 squared distances from the given point to each point in the set
+        point_repeat = np.repeat(point.reshape(1, -1), repeats=size, axis=0).reshape(-1, self.dim) #this duplicate the point n times where n is the number of points in set
+        the_substract = point_repeat - self.points #substract each coordinate from its corresponding coordinate
+        the_multiply = (np.multiply(the_substract, the_substract))#squared of each one of the substract results
+        the_plus = np.sum(the_multiply, axis=1)#sum all the squared substractions
+        all_distances = np.multiply(self.weights.reshape(-1), the_plus.reshape(-1))#multiply all the distances by the weights of wach corresponding point in the set
+        if type == "by rate":
+            m = int(m * self.get_size()) #number of points is m percents of n
+        m_th_distance = np.partition(all_distances, m)[m] #the m-th distance
+        distances_smaller_than_median_indices = np.where(all_distances <= m_th_distance) #all the m smallest distances indices in self.points
+        P_subset = self.points[distances_smaller_than_median_indices]
+        w_subset = self.weights[distances_smaller_than_median_indices]
+        indexes_subset = self.indexes[distances_smaller_than_median_indices]
+        return SetOfPoints(P_subset, w_subset, indexes=indexes_subset)
+
+    ##################################################################################
+
+    def get_closest_points_to_set_of_points(self, P, m, type):
+        """
+        Args:
+            P (SetOfPoints) : a set of points
+            m (int): size of sample - may be percent or fixed number, depends on the parameter 'type'
+            type (str): available values: "by number"/"by rate"
+
+        Returns:
+            SetOfPoints: the points that are closest to the given set of points, by rate or by
+                         fixed number
+        """
+
+        assert type == "by number" or type == "by rate", "type undefined"
+        if type == "by number":
+            assert m <= self.get_size(), "(1) Number of points in query is larger than number of points in the set"
+        if type == "by rate":
+            assert m >= 0 and m <= 1, "(2) Number of points in query is larger than number of points in the set"
+
+        self_size = self.get_size()
+        self_points = np.asarray(self.points)
+        self_weights = np.asarray(self.weights)
+        P_size = P.get_size()
+        P_points = np.asarray(P.points)
+        P_weights = np.asarray(P.weights)
+
+        self_points_repeat_each_point = np.repeat(self_points, repeats=P_size, axis=0) #this duplicate the self_point P_size times
+        P_points_repeat_all = np.repeat(P_points.reshape(1, -1), repeats=self_size, axis=0).reshape(-1, self.dim) #this duplicate the P_points self_size times
+
+        self_weights_repeat_each_point = np.repeat(self_weights, repeats=P_size, axis=0).reshape(-1)  # this duplicate the self_point P_size times
+        P_weights_repeat_all = np.repeat(P_weights.reshape(1, -1), repeats=self_size,axis=0).reshape(-1)  # this duplicate the P_points self_size times
+
+        self_points_repeat_each_point_minus_P_points_repeat_all = np.sum((self_points_repeat_each_point - P_points_repeat_all)** 2, axis=1)
+        all_distances_unreshaped = self_points_repeat_each_point_minus_P_points_repeat_all * self_weights_repeat_each_point * P_weights_repeat_all
+        all_distances_reshaped = all_distances_unreshaped.reshape(-1, P_size)
+        all_distances = np.min(all_distances_reshaped, axis=1)
+        all_distances_is_nan = np.where(np.isnan(all_distances))
+
+        if type == "by rate":
+            m = int(m * self.get_size())  # number of points is m percents of n
+        m_th_distance = np.partition(all_distances, m)[m]  # the m-th distance
+        distances_smaller_than_median_indices = list(np.where(all_distances <= m_th_distance))  # all the m smallest distances indices in self.points
+        P_subset = self_points[tuple(distances_smaller_than_median_indices)]
+        w_subset = self_weights[tuple(distances_smaller_than_median_indices)]
+        indexes_subset = self.indexes[tuple(distances_smaller_than_median_indices)]
+        return SetOfPoints(P_subset, w_subset, indexes=indexes_subset)
+
+    ##################################################################################
+
+    def get_farthest_points_to_set_of_points(self, P, m, type):
+        """
+        Args:
+            P (SetOfPoints) : a set of points
+            m (int): size of sample - may be percent or fixed number, depends on the parameter 'type'
+            type (str): available values: "by number"/"by rate"
+
+        Returns:
+            SetOfPoints: the points that are closest to the given set of points, by rate or by
+                         fixed number
+        """
+
+        assert type == "by number" or type == "by rate", "type undefined"
+        if type == "by number":
+            assert m <= self.get_size(), "(1) Number of points in query is larger than number of points in the set"
+        if type == "by rate":
+            assert m >= 0 and m <= 1, "(2) Number of points in query is larger than number of points in the set"
+
+        self_size = self.get_size()
+        self_points = np.asarray(self.points)
+        self_weights = np.asarray(self.weights)
+        P_size = P.get_size()
+        P_points = np.asarray(P.points)
+        P_weights = np.asarray(P.weights)
+
+        self_points_repeat_each_point = np.repeat(self_points, repeats=P_size, axis=0) #this duplicate the self_point P_size times
+        P_points_repeat_all = np.repeat(P_points.reshape(1, -1), repeats=self_size, axis=0).reshape(-1, self.dim) #this duplicate the P_points self_size times
+
+        self_weights_repeat_each_point = np.repeat(self_weights, repeats=P_size, axis=0).reshape(-1)  # this duplicate the self_point P_size times
+        P_weights_repeat_all = np.repeat(P_weights.reshape(1, -1), repeats=self_size,axis=0).reshape(-1)  # this duplicate the P_points self_size times
+
+        self_points_repeat_each_point_minus_P_points_repeat_all = np.sum((self_points_repeat_each_point - P_points_repeat_all)** 2, axis=1)
+        all_distances_unreshaped = self_points_repeat_each_point_minus_P_points_repeat_all * self_weights_repeat_each_point * P_weights_repeat_all
+        all_distances_reshaped = all_distances_unreshaped.reshape(-1, P_size)
+        all_distances = np.min(all_distances_reshaped, axis=1)
+        if type == "by rate":
+            m = int(m * self.get_size())  # number of points is m percents of n
+        partition_index = self_size - m
+        m_th_distance = np.partition(all_distances, partition_index)[partition_index]  # the m-th distance
+        distances_smaller_than_median_indices = list(np.where(all_distances >= m_th_distance))  # all the m smallest distances indices in self.points
+        P_subset = self_points[distances_smaller_than_median_indices]
+        w_subset = self_weights[distances_smaller_than_median_indices]
+        indexes_subset = self.indexes[distances_smaller_than_median_indices]
+        return SetOfPoints(P_subset, w_subset, indexes=indexes_subset)
+
+    ##################################################################################
+
+    def get_farthest_points_to_point(self, point, m, type):
+        """
+        Args:
+            point (np.ndarray) : d-dimensional point
+            m (int): size of sample - may be percent or fixed number, depends on the parameter 'type'
+            type (str): available values: "by number"/"by rate"
+
+        Returns:
+            SetOfPoints: the points that are farthest to the given point, by rate or by
+                         fixed number
+        """
+        assert type == "by number" or type == "by rate", "type undefined"
+        if type == "by number":
+            assert m <= self.get_size(), "(1) Number of points in query is larger than number of points in the set"
+        if type == "by rate":
+            assert m >= 0 and m <= 1, "(2) Number of points in query is larger than number of points in the set"
+
+        assert type == "by number" or type == "by rate", "type undefined"
+        if type == "by number":
+            assert m <= self.get_size(), "(1) Number of points in query is larger than number of points in the set"
+        if type == "by rate":
+            assert m >= 0 and m <= 1, "(2) Number of points in query is larger than number of points in the set"
+
+        size = self.get_size()
+
+        #this calculates all the l2 squared distances from the given point to each point in the set
+        point_repeat = np.repeat(point.reshape(1, -1), repeats=size, axis=0).reshape(-1, self.dim) #this duplicate the point n times where n is the number of points in set
+        the_substract = point_repeat - self.points #substract each coordinate from its corresponding coordinate
+        the_multiply = (np.multiply(the_substract, the_substract)) #squared of each one of the substract results
+        the_plus = np.sum(the_multiply, axis=1) #sum all the squared substractions
+        all_distances = np.multiply(self.weights, the_plus)#multiply all the distances by the weights of wach corresponding point in the set
+        if type == "by rate":
+            m = int(m * self.get_size()) #number of points is m percents of n
+        m_th_distance = np.partition(all_distances, size - m)[size - m] #the m-th distance
+        distances_smaller_than_median_indices = np.where(all_distances >= m_th_distance) #all the m largest distances indices in self.points
+        P_subset = self.points[distances_smaller_than_median_indices]
+        w_subset = self.weights[distances_smaller_than_median_indices]
+        indexes_subset = self.indexes[distances_smaller_than_median_indices]
+        return SetOfPoints(P_subset, w_subset, indexes=indexes_subset)
+
+
+    ##################################################################################
+
+    def get_sum_of_distances_to_point(self, point, weight=1):
+        """
+        Args:
+            point (np.ndarray) : d-dimensional point
+            weight (float, optional) : weight of point
+
+        Returns:
+            float: the sum of weighted distances to the given weighted point
+        """
+
+        assert weight > 0, "weight not positive"
+
+        P = self.points
+        point = point.reshape(-1, self.dim)
+        w = self.weights.reshape(-1, 1)
+        size = self.get_size()
+
+        # this calculates the sum of all the l2 squared distances from the given point to each point in the set
+        point_repeat = np.repeat(point.reshape(1, -1), repeats=size, axis=0).reshape(-1, self.dim) #this duplicate the point n times where n is the number of points in set
+        the_substract = point_repeat - self.points #substract each coordinate from its corresponding coordinate
+        the_multiply = (np.multiply(the_substract, the_substract)) #squared of each one of the substract results
+        the_plus = np.sum(the_multiply, axis=1).reshape(-1,1) #sum all the squared substractions
+        all_distances = np.multiply(w, the_plus) #multiply all the distances by the weights of wach corresponding point in the set
+        sum_of_distances = sum(all_distances)
+        return sum_of_distances
+
+    ##################################################################################
+
+    def get_median(self, sample_size_rate, closest_rate):
+        """
+        Args:
+            sample_size_rate (float) : the size of the sample relative to the set
+            closest_rate (float) : the size of closest points to the median relative to the set
+
+        Returns:
+            np.ndarray: the median of the set. See Alg. 3 in the paper;
+        """
+
+        assert sample_size_rate < 1 and sample_size_rate > 0, "sample_size_rate not in (0,1)"
+        assert closest_rate < 1 and closest_rate > 0, "closest_rate not in (0,1)"
+        assert self.get_size() != 0, "there is no points in the set is zero"
+
+        size_of_sample = int(sample_size_rate*self.get_size())
+        if size_of_sample == 0:
+            S = self
+        else:
+            S = self.get_sample_of_points(size_of_sample)
+        points = S.points
+        weights = S.weights
+        dim = self.dim
+        size = len(points)
+
+        points_each_repeat = np.repeat(points, repeats=size, axis=0) #this generates [[p_1, p_1, p_1,... <n times>],[p_2,p_2,p_2,... <n times>],...,[p_n,p_n,p_n,... <n times>]]
+        points_all_repeat = np.repeat(points.reshape(1, -1), repeats=size, axis=0).reshape(-1, dim) #this generates [[p_1, p_2, p_3,...,p_n],[p_1, p_2, p_3,...,p_n],...<n times>]]
+        weights_all_repeat = np.repeat(weights.reshape(-1), repeats=size).reshape(-1)
+        the_substract = points_each_repeat - points_all_repeat #substract each coordinate from its corresponding coordinate
+        the_multiply = (np.multiply(the_substract, the_substract)) #squared of each one of the substract results
+        the_plus = np.sum(the_multiply, axis=1).reshape(-1, 1) #sum all the squared substractions
+        all_distances = np.multiply(weights_all_repeat.reshape(-1, 1), the_plus) #multiply all the distances by the weights of wach corresponding point in the set
+        all_distances_per_point = all_distances.reshape(size, -1) #that generates n \times n matrix, where the i,j entry is the weighted squared distance from the i-th points in the set to the j-th point int the set
+        #print("all_distances_per_point: \n", all_distances_per_point)
+        number_of_closest = int(size * closest_rate)
+        all_distances_per_point_medians_in_the_middle = np.partition(all_distances_per_point, number_of_closest , axis=1) #this puts the median distance at each row in the middle
+        #print("all_distances_per_point_medians_in_the_middle: \n", all_distances_per_point_medians_in_the_middle)
+        all_cosest_distances_per_point = all_distances_per_point_medians_in_the_middle[:, 0:number_of_closest] #this removes all the entries that are right to the medians in all the rows. That is, n \times n/2 array, where the distances in row i is the distances to the closest n/2 points to the i-th point in the set
+        sum_of_closest_distances_per_point = np.sum(all_cosest_distances_per_point, axis=1) #this generates 1 times n array of distances, where the i-th distance is the sum of weighted sqared dostances from the i-th point in the set to its n/2 closest points
+        median_index = np.argmin(sum_of_closest_distances_per_point) #the index of the median
+        median_point = points[median_index]
+        return median_point
+
+    ######################################################################
+
+    def set_points(self, points):
+        """
+        :param points: numpy ndarray, sets all the points fo the set
+        :return: None
+        """
+        assert self.get_size() > 0, "set is empty"
+        self.points = points
+
+    ######################################################################
+
+    def set_all_sensitivities(self, sensitivity):
+        """
+        The method gets a number and set all the sensitivities to be that number
+        Args:
+            sensitivity (float) : the sensitivity we set for all the points in the set
+
+        Returns:
+            ~
+        """
+
+        assert sensitivity > 0, "sensitivity is not positive"
+        assert self.get_size() > 0, "set is empty"
+
+        new_sensitivities = np.ones((self.get_size(), 1), dtype=np.float) * sensitivity
+        self.sensitivities = new_sensitivities
+
+    ######################################################################
+
+    def set_weights(self, T, m):
+        """
+        The method sets the weights in the set to as described in line 10 int the main alg;
+        Args:
+            T (float) : sum of sensitivities
+            m (int) : coreset size
+
+        Returns:
+            ~
+        """
+
+        assert self.get_size() > 0, "set is empty"
+
+        # numerator = self.weights.reshape(-1,1) * T #np.ones((self.get_size(), 1), dtype=np.float) * T
+        numerator = np.ones_like(self.sensitivities) * T #np.ones((self.get_size(), 1), dtype=np.float) * T
+        denominator = self.sensitivities * m
+        new_weights = numerator / denominator
+
+        self.weights = new_weights
+
+    #######################################################################
+
+    def get_probabbilites(self):
+        """
+        The method returns the probabilities to be choosen as described in line 9 in main alg
+        Returns:
+            np.ndarray: the probabilities to be choosen
+        """
+
+        T = self.get_sum_of_sensitivities()
+
+        probs = self.sensitivities / T
+        return probs
+
+    #########################################################################
+
+    def set_sensitivities(self, k):
+        """
+        The method set the sensitivities of the points in the set as decribed in line 5 in main alg.
+        Args:
+            k (int) : number of outliers
+
+        Returns:
+            ~
+        """
+
+        assert self.get_size() > 0, "set is empty"
+
+        size = self.get_size()
+        sensitivities1 = np.ones((self.get_size(), 1), dtype=float) * k * 1 / size# ((2*k ** 2 / np.log(self.get_size()))/size) # TODO: turned to float instead of np.float
+
+        self.sensitivities = sensitivities1
+        # sorted_indices = np.expand_dims(np.argsort(self.points[:, 0]).astype(np.float) + 1, axis=1)
+        # sensitivities2 = np.reciprocal(sorted_indices)
+        # sensitivities3 = np.reciprocal(np.subtract((self.get_size() + 1) * np.ones((self.get_size(), 1)), sorted_indices))
+        # self.sensitivities = np.maximum(sensitivities1, np.maximum(sensitivities2, sensitivities3))
+
+    #########################################################################
+
+    def get_arbitrary_sensitivity(self):
+        """
+        The method returns an arbitrary sensitivity from the set
+        Returns:
+            float: a random sensitivity from the set
+        """
+
+        assert self.get_size() > 0, "set is empty"
+
+        num = random.randint(-1, self.get_size() - 1)
+        return self.sensitivities[num]
+
+    #########################################################################
+
+    def get_robust_cost_to_point(self, point, k):
+        """
+        Args:
+            point (np.ndarray) : d-dimensional point
+            k (int) : number of outliers
+
+        Returns:
+            float:  the sum of weighted distances to the (size of set)-k closest points in the set the given point
+        """
+
+        closest = self.get_closest_points_to_point(point, self.get_size() - k, "by number")
+        total_cost = closest.get_sum_of_distances_to_point(point)
+        return total_cost
+
+    ###########################################################################
+
+    def get_cost_to_center_without_outliers(self, centers, outliers):
+        """
+        TODO: complete
+        :param centers:
+        :param outliers:
+        :return:
+        """
+
+        outliers_size = outliers.get_size()
+        self_size = self.get_size()
+
+        #closest = self.get_closest_points_to_set_of_points(centers, self_size - outliers_size, "by number")
+        #total_cost = closest.get_sum_of_distances_to_set_of_points(centers)
+        Q = copy.deepcopy(self)
+        Q.remove_from_set(outliers)
+        total_cost = Q.get_sum_of_distances_to_set_of_points(centers)
+        return total_cost
+
+    ###########################################################################
+
+    def get_points_at_indices(self, start, end):
+        """
+        Args:
+            start (int) : starting index
+            end (end) : ending index
+
+        Returns:
+            SetOfPoints: a set of point that contains the points in the given range of indices
+        """
+
+        size = end - start
+        indices = np.asarray(range(size)) + start
+
+        P_subset = self.points[indices]
+        w_subset = self.weights[indices]
+        sen_subset = self.sensitivities[indices]
+        indexes_subset = self.indexes[indices]
+        return SetOfPoints(P_subset, w_subset, sen_subset, indexes_subset)
+
+    ###########################################################################
+
+    def get_2_approx_points(self, k):
+        """
+        This function gets integer k>0 and returns k points that minimizes the sum of squared distances to the points
+        in the set up to contant factor
+        :param k:
+        :return:
+        """
+        points = self.points
+        weights = self.weights
+        dim = self.dim
+        size = len(points)
+
+        points_each_repeat = np.repeat(points, repeats=size,axis=0)  # this generates [[p_1, p_1, p_1,... <n times>],[p_2,p_2,p_2,... <n times>],...,[p_n,p_n,p_n,... <n times>]]
+        points_all_repeat = np.repeat(points.reshape(1, -1), repeats=size, axis=0).reshape(-1,dim)  # this generates [[p_1, p_2, p_3,...,p_n],[p_1, p_2, p_3,...,p_n],...<n times>]]
+        weights_all_repeat = np.tile(weights, size).transpose().reshape(1,-1).transpose()  # this generates n^2 weights, that is n weights that coressponding for each one of the n duplications of the points in the set
+        the_substract = points_each_repeat - points_all_repeat  # substract each coordinate from its corresponding coordinate
+        the_multiply = (np.multiply(the_substract, the_substract))  # squared of each one of the substract results
+        the_plus = np.sum(the_multiply, axis=1).reshape(-1, 1)  # sum all the squared substractions
+        all_distances = np.multiply(weights_all_repeat,the_plus)  # multiply all the distances by the weights of wach corresponding point in the set
+        all_distances_per_point = all_distances.reshape(size, -1)  # that generates n \times n matrix, where the i,j entry is the weighted squared distance from the i-th points in the set to the j-th point int the set
+        all_distances_from_each_point_to_entire_set = np.sum(all_distances_per_point, axis=1)
+        size = self.get_size()
+        all_indices = np.asarray(range(size)).reshape(1, -1)
+        all_indices_repeat = np.repeat(all_indices, k, axis=0)
+
+        all_k_combination_of_all_indices = np.array(np.meshgrid(*all_indices_repeat)).T.reshape(-1, k)
+        all_k_combination_of_all_indices_flat = np.asarray(all_k_combination_of_all_indices).reshape(-1)
+        distance_from_points_to_all_set_by_all_combinations = all_distances_per_point[all_k_combination_of_all_indices_flat]
+        distance_from_points_to_all_set_by_all_combinations_reshaped = distance_from_points_to_all_set_by_all_combinations.reshape(-1,k,size)
+        all_distances_from_each_combination_to_all_set = np.min(distance_from_points_to_all_set_by_all_combinations_reshaped, axis=1)
+        sum_of_distances_from_each_combination_to_all_set = np.sum(all_distances_from_each_combination_to_all_set, axis=1)
+        min_index_of_combination = np.argmin(sum_of_distances_from_each_combination_to_all_set)
+        min_indices = all_k_combination_of_all_indices[min_index_of_combination]
+        min_centers = points[min_indices]
+        x = 2
+        return min_centers
+
+    ###########################################################################
+
+    def get_sum_of_distances_to_set_of_points(self, centers):
+        """
+        This function gets a set of k centers and returns the sum of squared distances to these centers
+        :param centers:
+        :return:
+        """
+
+        self_points = self.points
+        centers_points = centers.points
+        self_weights = self.weights
+        centers_weights = centers.weights
+        dim = self.dim
+        size = len(self_points)
+        k = centers.get_size()
+
+        centers_points_each_repeat = np.repeat(centers_points, repeats=size, axis=0)
+        centers_weights_each_repeat = np.repeat(centers_weights, repeats=size, axis=0).reshape(-1)
+        self_points_all_repeat = np.repeat(self_points.reshape(1, -1), repeats=k, axis=0).reshape(-1, dim) #this generates [[p_1, p_2, p_3,...,p_n],[p_1, p_2, p_3,...,p_n],...<n times>]]
+        self_weights_all_repeat = np.repeat(self_weights.reshape(1, -1), repeats=k, axis=0).reshape(-1)
+        centers_points_each_repeat_minus_self_points_all_repeat = centers_points_each_repeat - self_points_all_repeat
+        squared_norms = np.sum(np.multiply(centers_points_each_repeat_minus_self_points_all_repeat, centers_points_each_repeat_minus_self_points_all_repeat),axis=1)
+        all_distances = squared_norms * centers_weights_each_repeat * self_weights_all_repeat
+        all_distances_from_each_center = all_distances.reshape(-1,size)
+        min_distances = np.min(all_distances_from_each_center, axis=0)
+        cost = np.sum(min_distances)
+        return cost
+
+    ###########################################################################
+
+    def get_number_of_points_larger_than_value(self, value):
+        """
+        TODO: complete
+        :param value:
+        :return:
+        """
+        assert self.dim == 1, "dimension not fit to this task, only works when d=1"
+
+        counter = 0
+        the_points = []
+        for point in self.points:
+            if point > value:
+                the_points.append(point)
+                counter += 1
+        return counter
+
+    ###########################################################################
+
+    def sort_by_indexes(self):
+        self_size = self.get_size()
+        self_points = self.points
+        self_weights = self.weights
+        self_sensitivities = self.sensitivities
+        self_indexes = self.indexes
+        new_points = []
+        new_weights = []
+        new_sensitivities = []
+        new_indexes = []
+        for i in np.sort(self_indexes):
+            for j in range(self_size):
+                if self.indexes[j] == i:
+                    new_points.append(self_points[j])
+                    new_weights.append(self_weights[j])
+                    new_sensitivities.append(self_sensitivities[j])
+                    new_indexes.append(self_indexes[j])
+        self.points = np.asarray(new_points)
+        self.weights = np.asarray(new_weights)
+        self.sensitivities = np.asarray(new_sensitivities)
+        self.indexes = np.asarray(new_indexes)
+
+    #########################################################
+
+# from here it's my code, don't change the code above!
+    def copy_array(self, array):
+        return array.copy()
+
+    #########################################################
+
+    def get_copy(self):
+        p, w, sen, indexes = self.copy_array(self.points), self.copy_array(self.weights), self.copy_array(self.sensitivities),\
+                             self.copy_array(self.indexes)
+        return SetOfPoints(p, w, sen, indexes)
+
+    #########################################################
+
+    def get_line_between_two_points(self, point1, point2):
+        if point1[0] == point2[0]:
+            slope = sys.maxsize
+        elif point1[1] == point2[1]:
+            slope = sys.maxsize
+        else:
+            slope = (point2[1] - point1[1]) / (point2[0] - point1[0])
+        y_intercept = point1[1] - slope * point1[0]
+        return Line(point1, point2, slope, y_intercept)
+
+    #########################################################
+
+    def get_line_between_every_two_points(self):
+        lines = []
+        for i in range(self.get_size()):
+            for j in range(i + 1, self.get_size()):
+                lines.append(self.get_line_between_two_points(self.points[i], self.points[j]))
+        return lines
+
+    #########################################################
+
+    def sorted_indices_by_cost(self, lines):
+        costs = []
+        for point in self.points:
+            cost_point = sys.maxsize
+            for line in lines:
+                dist = line.distance_from_point(point)
+                cost_point = dist if dist < cost_point else cost_point
+            costs.append(cost_point)
+        return costs
+
+    #########################################################
+
+    def get_set_of_points_with_indices(self, indices):
+        return SetOfPoints(self.points[indices],  self.weights[indices], self.sensitivities[indices], self.indexes[indices])
+
+    #########################################################
+
+    def remove_points(self, sorted_indeces_by_costs, percentage_of_points_to_reduce_every_iteration):
+        """
+        :param sorted_indeces_by_costs: costs of points from the Bi-Criteria
+        :param percentage_of_points_to_reduce_every_iteration: percentage of points to remove every iteration
+        :return: (SetofPoints) the set of points without the points that were with the smallest cost
+        """
+        indices_to_remove = sorted_indeces_by_costs[:int(percentage_of_points_to_reduce_every_iteration * self.get_size())]
+        set_of_points_to_remove = self.get_set_of_points_with_indices(indices_to_remove)
+        self.remove_from_set(set_of_points_to_remove)
+
+    #########################################################
+
+    def project_to_lines(self, lines, plot=False):
+        points_on_Bi_Criteria = {}
+        for line in lines:
+            points_on_Bi_Criteria[line] = SetOfPoints()
+        for point, i in zip(self.points, self.indexes):
+            min_ = sys.maxsize
+            closest_line = None
+            for line in lines:
+                if line.distance_from_point(point) < min_:
+                    min_ = line.distance_from_point(point)
+                    closest_line = line
+
+            projected_point = point.copy()
+            projected_point = closest_line.project_point_to_line(projected_point)
+            points_on_Bi_Criteria[closest_line].add_set_of_points(SetOfPoints(np.array([projected_point]), np.ones(1),
+                                                                              np.ones(1), np.array(i)))
+
+
+        if plot:
+            plt.figure()
+            colors = []
+            for i in range(len(lines)):
+                colors.append((random.random(), random.random(), random.random()))
+            for i, group in enumerate(points_on_Bi_Criteria.values()):
+                plt.scatter(group.points[:, 0], group.points[:, 1], c=colors[i])
+            plt.show()
+        return points_on_Bi_Criteria
+
+    #########################################################
+    def coreset_return_sensitivities(self, P, k, m):
+        """
+        Args:
+            P (SetOfPoints) : set of weighted points
+            k (int) : number of weighted centers
+            m (int) : size of wanted coreset
+        Returns:
+            SetOfPoints: the coreset of P for k weighted centers. See Alg. 2 in the paper;
+        """
+        median_sample_size = self.parameters_config.median_sample_size
+        closest_to_median_rate = self.parameters_config.closest_to_median_rate
+        assert k > 0, "k is not a positive integer"
+        assert m > 0, "m is not a positive integer"
+        assert P.get_size() != 0, "Q size is zero"
+        number_of_remains_multiply_factor = self.parameters_config.number_of_remains_multiply_factor
+        max_sensitivity_multiply_factor = self.parameters_config.max_sensitivity_multiply_factor
+        minimum_number_of_points_in_iteration = k*number_of_remains_multiply_factor #int(math.log(P.get_size()))
+        Q = copy.deepcopy(P)
+        temp_set = SetOfPoints()
+        max_sensitivity = -1
+        flag1 = False
+        flag2 = False
+        while True:
+            [q_k, Q_k] = self.recursive_robust_median(Q, k, median_sample_size, closest_to_median_rate) #get the recursive median q_k and its closest points Q_k
+            if Q_k.get_size() == 0:
+                flag1 = True
+                continue
+            Q_k.set_sensitivities(k)# sets all the sensitivities in Q_k as described in line 5 in main alg.
+            current_sensitivity = Q_k.get_arbitrary_sensitivity()
+            if current_sensitivity > max_sensitivity:
+                max_sensitivity = current_sensitivity #we save the maximum sensitivity in order to give the highest sensitivity to the points that remains in Q after this loop ends
+            temp_set.add_set_of_points(Q_k) #since we remove Q_k from Q each time, we still want to save every thing in order to go over the entire points after this loop ends and select from them and etc., so we save everything in temp_set
+            Q.remove_from_set(Q_k)
+            size = Q.get_size()
+            size_Q_k = Q_k.get_size()
+            Q_k_weigted_size = Q_k.get_sum_of_weights()
+            if size <= minimum_number_of_points_in_iteration or Q_k_weigted_size == 0: # stop conditions
+                flag2 = True
+                break
+        if Q.get_size() > 0:
+            Q.set_all_sensitivities(1) # here we set the sensitivities of the points who left to the highest - since they are outliers with a very high probability
+            temp_set.add_set_of_points(Q) #and now temp_set is all the points we began with - just with updated sensitivities
+        # T = temp_set.get_sum_of_sensitivities()
+        # temp_set.set_weights(T, m) #sets the weights as described in line 10 in main alg
+        #temp_set.sort_by_indexes() #change this line in tests for sensativities bound
+        return temp_set#temp_set.sensitivities, temp_set.weights
+
+    #########################################################
+    def computeSensativities(self):
+        con1 = np.vectorize(self.f1)
+        con2 = np.vectorize(self.f2)
+        cluster_WKmeans = self.coreset_return_sensitivities(self, self.parameters_config.k,
+                                                         self.parameters_config.coreset_size)
+        cluster_WKmeans.sort_by_indexes()
+        idx_sort = self.sortOnSubspace()
+        try:
+            tmp = np.array([con1(idx_sort), con2(idx_sort, self.get_size()), np.squeeze(cluster_WKmeans.sensitivities) if cluster_WKmeans.get_size() > 1 else cluster_WKmeans.sensitivities[0]]) # TODO: temporary change, remove the 0
+        except:
+            print("a")
+        S = np.max(tmp, axis=0)
+        # plt.scatter(self.points[:, 0], self.points[:, 1])
+        # plt.show()
+        return S
+
+
+    #########################################################
+
+    @staticmethod
+    def f1(x):
+        return 1 / x
+
+    #########################################################
+    @staticmethod
+    def f2(x, n):
+        return 1 / (n - x + 1)
+
+    #########################################################
+    def sortOnSubspace(self):
+        if self.get_size() == 1:
+            return np.array([1])
+        else:
+            # self.points = np.array([[1, 1], [2, 2], [3, 3], [4, 4], [0, 0], [5, 5], [-1, -1]])
+            v = self.points[0] - self.points[1]
+            I = np.apply_along_axis(lambda x: np.dot(x, v), axis=1, arr=self.points)
+            y = np.zeros_like(I)
+            y[np.argsort(I)] = np.arange(I.shape[0]) + 1
+
+            # fig, ax = plt.subplots()
+            # ax.scatter(self.points[:, 0], self.points[:, 1])
+            # ax.scatter(self.points[[0, 1], 0], self.points[[0, 1], 1], color='red')
+            # for i in range(len(self.points)):
+            #     ax.annotate(y[i], (self.points[i][0], self.points[i][1]))
+            #
+            # plt.show()
+            return y
+
+    #########################################################
+    def recursive_robust_median(self, P, k, median_sample_size, recursive_median_closest_to_median_rate):
+        """
+        Args:
+            P (SetOfPoints) : set of weighted points
+            k (int) : number of weighted centers
+            median_sample_size (int) : the size of closest points to the median
+            recursive_median_closest_to_median_rate (float) : parameter for the median
+
+        Returns:
+            [np.ndarray, SetOfPoints]: the recursive robust median of P and its closest points. See Alg. 1 in the paper;
+        """
+
+        iterations_median = self.parameters_config.iterations_median
+
+        assert k > 0, "k is not a positive integer"
+        assert recursive_median_closest_to_median_rate < 1 and recursive_median_closest_to_median_rate > 0, "closest_rate2 not in (0,1)"
+        assert P.get_size() != 0, "Q size is zero"
+
+        minimum_number_of_points_in_iteration = int(np.log(P.get_size())) #for stop condition
+        Q = copy.deepcopy(P)
+        q = []
+        for i in range(iterations_median):#used to be until k
+            size_of_sample = median_sample_size
+            q = Q.get_sample_of_points(size_of_sample)
+            Q = Q.get_closest_points_to_set_of_points(q, recursive_median_closest_to_median_rate, type="by rate") #the median closest points
+
+            size = Q.get_size()
+            if size <= minimum_number_of_points_in_iteration:
+                break
+        return [q, Q]
+
+
+def create_data(file_name):
+    points = []
+    for point in open(file_name).readlines():
+        values = point.split(',')
+        points.append([float(values[0]), float(values[2])])
+    return points
+
+
+def from_list_to_ndarray(points):
+    data = zeros((len(points), 2))
+    for i, point in enumerate(points):
+        data[i, 0] = point[0]
+        data[i, 1] = point[1]
+    return data
+
+
+def getCoresetIndexes(data_path, size):
+    """
+    :param data_path : path of data: numpy nxd array, represents points in R^d
+    :param size: size of wanted coreset
+    :return: SetofPoints, the coreset
+    """
+    data = from_list_to_ndarray(create_data(data_path))
+    # parameters for the coreset
+    params = ParameterConfig()
+    # defining class for data
+    P = SetOfPoints(data, parameters_config=params)
+    # compute sensitivity of each point
+    P_S = computeSensitivities(P)
+    # defined size of coreset as defined by user
+    P_S.parameters_config.coreset_size = size
+    # define weights from the sensitivities
+    P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
+    # sample coreset
+    C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
+
+    return C.indexes
+
+
+if __name__ == "__main__":
+    # Check if the correct number of arguments is provided
+    if len(sys.argv) != 4:
+        print("Usage: python script.py <data_path> <size> <output_path>")
+        sys.exit(1)
+
+    # Extract the command-line arguments
+    data_path = sys.argv[1]
+    size = int(sys.argv[2])
+    output_path = sys.argv[3]
+    indexes = getCoresetIndexes(data_path, size)
+    print(indexes)
+    # Write indexes to the output file
+    savetxt(output_path, indexes, delimiter=',', fmt='%d')
+    print("Integration Works!")
