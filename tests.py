@@ -4,6 +4,7 @@ from coreset import computeSensitivities, sampleCoreset
 from algo import exhaustive_search, computeCost, computeCostToPolygon
 from tqdm import tqdm
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
+import scipy
 import pickle
 
 class Test:
@@ -16,20 +17,23 @@ class Test:
         epsilon_array_uniform = np.zeros((self.sizes.shape[0], self.iterations))
         epsilon_array_coreset = np.zeros((self.sizes.shape[0], self.iterations))
         print("Finding Optimal Polygon")
-        # with open('opt.p', 'rb') as handle:
-        #     opt = pickle.load(handle)
-        # opt_cost = computeCostToPolygon(self.P, opt)
-        opt, opt_cost = exhaustive_search(self.P, iters=1000, plot=True)
+        with open('opt.p', 'rb') as handle:
+            opt = pickle.load(handle)
+        opt_cost = computeCostToPolygon(self.P, opt)
+        plt.scatter(self.P.points[:, 0], self.P.points[:, 1])
+        plt.plot(opt.points[opt.vertices, 0], opt.points[opt.vertices, 1], 'r--', lw=2)
+        plt.show()
+        # opt, opt_cost = exhaustive_search(self.P, iters=100000, plot=False, use_tqdm=True)
         # with open('opt.p', 'wb') as handle:
         #     pickle.dump(opt, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        P_S = computeSensitivities(self.P)
         print("Finished finding Optimal Polygon")
         for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
             print(f'Testing size {size}')
-            P_S.parameters_config.coreset_size = size
-
-            P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
             for j in tqdm(range(self.iterations)):
+                P_S = computeSensitivities(self.P)
+                P_S.parameters_config.coreset_size = size
+                P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
+
                 uniform_sample = P_S.get_sample_of_points(size)
                 uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
                 C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
@@ -51,20 +55,31 @@ class Test:
                 # epsilon_array_coreset[i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
             print(f'uniform = {epsilon_array_uniform[i].mean()}')
             print(f'coreset = {epsilon_array_coreset[i].mean()}')
+            print(f'uniform std = {epsilon_array_uniform[i].std()}')
+            print(f'coreset std = {epsilon_array_coreset[i].std()}')
 
-        max_epsilon_array_uniform = np.max(epsilon_array_uniform, axis=1)
-        min_epsilon_array_uniform = np.min(epsilon_array_uniform, axis=1)
+        std_epsilon_array_uniform = scipy.stats.median_abs_deviation(epsilon_array_uniform, axis=1)
         mean_epsilon_array_uniform = np.mean(epsilon_array_uniform, axis=1)
-        max_epsilon_array_coreset = np.max(epsilon_array_coreset, axis=1)
-        min_epsilon_array_coreset = np.min(epsilon_array_coreset, axis=1)
+        std_epsilon_array_coreset = scipy.stats.median_abs_deviation(epsilon_array_coreset, axis=1)
         mean_epsilon_array_coreset = np.mean(epsilon_array_coreset, axis=1)
 
+        with open('results/exp1/mean_epsilon_array_coreset_opt.p', 'wb') as handle:
+            pickle.dump(mean_epsilon_array_coreset, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('results/exp1/mean_epsilon_array_uniform.p', 'wb') as handle:
+            pickle.dump(mean_epsilon_array_uniform, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('results/exp1/std_epsilon_array_coreset.p', 'wb') as handle:
+            pickle.dump(std_epsilon_array_coreset, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('results/exp1/std_epsilon_array_uniform.p', 'wb') as handle:
+            pickle.dump(std_epsilon_array_uniform, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         plt.title("Coreset vs Uniform")
         plt.xlabel("Coreset size")
         plt.ylabel("Epsilon")
-        plt.plot(self.sizes, mean_epsilon_array_uniform, label="Uniform")
-        plt.plot(self.sizes, mean_epsilon_array_coreset, label="Coreset")
+        #plt.plot(self.sizes, mean_epsilon_array_uniform, label="Uniform")
+        #plt.plot(self.sizes, mean_epsilon_array_coreset, label="Coreset")
+        plt.errorbar(self.sizes, mean_epsilon_array_uniform, std_epsilon_array_uniform, label="Uniform")
+        plt.errorbar(self.sizes, mean_epsilon_array_coreset, std_epsilon_array_coreset, label="Coreset")
+        plt.yscale("log")
         plt.legend()
         plt.grid()
         plt.show()
@@ -126,44 +141,48 @@ class Test:
         epsilon_array_uniform = np.zeros((10, self.sizes.shape[0], self.iterations))
         epsilon_array_coreset = np.zeros((10, self.sizes.shape[0], self.iterations))
 
-        P_S = computeSensitivities(self.P)
         print("Sampling Polygons")
-        polygons = self.samplePolygons(P_S, 10)
+        polygons = self.samplePolygons(self.P, 10)
         print("Finished sampling Polygons")
         for l, polygon in enumerate(polygons):
             for i, size in tqdm(enumerate(self.sizes), desc='Testing'):
                 print(f'Testing size {size}')
-                P_S.parameters_config.coreset_size = size
-                P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
                 for j in tqdm(range(self.iterations)):
+                    P_S = computeSensitivities(self.P)
+                    P_S.parameters_config.coreset_size = size
+                    P_S.set_weights(P_S.get_sum_of_sensitivities(), P_S.parameters_config.coreset_size)
+
                     uniform_sample = P_S.get_sample_of_points(size)
                     uniform_sample.weights = np.ones_like(uniform_sample.weights) * P_S.get_size() / size
                     C = sampleCoreset(P_S, P_S.parameters_config.coreset_size)
-                    plt.scatter(P_S.points[:, 0], P_S.points[:, 1], color='blue')
-                    plt.scatter(uniform_sample.points[:, 0], uniform_sample.points[:, 1], color='red')
-                    plt.scatter(C.points[:, 0], C.points[:, 1], color='green')
-                    plt.legend(['data', 'uniform', 'coreset'])
+                    # plt.scatter(P_S.points[:, 0], P_S.points[:, 1], color='blue')
+                    # plt.scatter(uniform_sample.points[:, 0], uniform_sample.points[:, 1], color='red')
+                    # plt.scatter(C.points[:, 0], C.points[:, 1], color='green')
+                    # plt.legend(['data', 'uniform', 'coreset'])
                     # plt.show()
-                    plt.savefig(f'tmp/plot_size_{size}_{j}.jpg')
+                    # plt.savefig(f'tmp/plot_size_{size}_{j}.jpg')
                     cost_uniform = computeCostToPolygon(uniform_sample, polygon)
                     cost_coreset = computeCostToPolygon(C, polygon)
-                    cost_opt_uniform = computeCostToPolygon(self.P, polygon)
-                    cost_opt_coreset = computeCostToPolygon(self.P, polygon)
-                    epsilon_array_uniform[l][i][j] = self.computeEpsilon(cost_opt_uniform, cost_uniform)
-                    epsilon_array_coreset[l][i][j] = self.computeEpsilon(cost_opt_coreset, cost_coreset)
+                    cost_opt = computeCostToPolygon(self.P, polygon)
+                    epsilon_array_uniform[l][i][j] = self.computeEpsilon(cost_opt, cost_uniform)
+                    epsilon_array_coreset[l][i][j] = self.computeEpsilon(cost_opt, cost_coreset)
 
-            max_epsilon_array_uniform = np.max(epsilon_array_uniform[l], axis=1)
-            min_epsilon_array_uniform = np.min(epsilon_array_uniform[l], axis=1)
+                print(f'uniform = {epsilon_array_uniform[l][i].mean()}')
+                print(f'coreset = {epsilon_array_coreset[l][i].mean()}')
+                print(f'uniform std = {epsilon_array_uniform[l][i].std()}')
+                print(f'coreset std = {epsilon_array_coreset[l][i].std()}')
+
+            std_epsilon_array_uniform = np.std(epsilon_array_uniform[l], axis=1)
             mean_epsilon_array_uniform = np.mean(epsilon_array_uniform[l], axis=1)
-            max_epsilon_array_coreset = np.max(epsilon_array_coreset[l], axis=1)
-            min_epsilon_array_coreset = np.min(epsilon_array_coreset[l], axis=1)
+            std_epsilon_array_coreset = np.std(epsilon_array_coreset[l], axis=1)
             mean_epsilon_array_coreset = np.mean(epsilon_array_coreset[l], axis=1)
 
             plt.title("Coreset vs Uniform, Random Polygon")
             plt.xlabel("Coreset size")
             plt.ylabel("Epsilon")
-            plt.plot(self.sizes, mean_epsilon_array_uniform, label="Uniform")
-            plt.plot(self.sizes, mean_epsilon_array_coreset, label="Coreset")
+            plt.errorbar(self.sizes, mean_epsilon_array_uniform, std_epsilon_array_uniform, label="Uniform")
+            plt.errorbar(self.sizes, mean_epsilon_array_coreset, std_epsilon_array_coreset, label="Coreset")
+            # plt.yscale("log")
             plt.legend()
             plt.grid()
             plt.show()

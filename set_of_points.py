@@ -76,9 +76,9 @@ class SetOfPoints:
             self.points = np.asarray(P)
         [_, self.dim] = np.shape(self.points)
         if w == []:
-            w = np.ones((size, 1), dtype=np.float)
+            w = np.ones((size, 1), dtype=float) # TODO: changed from np.float to float
         if sen == []:
-            sen = np.ones((size, 1), dtype=np.float)
+            sen = np.ones((size, 1), dtype=float) # TODO: changed from np.float to float
         self.weights = w
         self.sensitivities = sen
         if indexes == []:
@@ -603,7 +603,7 @@ class SetOfPoints:
         assert self.get_size() > 0, "set is empty"
 
         size = self.get_size()
-        sensitivities1 = np.ones((self.get_size(), 1), dtype=np.float) * k * 1.5 / size# ((2*k ** 2 / np.log(self.get_size()))/size)
+        sensitivities1 = np.ones((self.get_size(), 1), dtype=float) * k * 1 / size# ((2*k ** 2 / np.log(self.get_size()))/size) # TODO: turned to float instead of np.float
 
         self.sensitivities = sensitivities1
         # sorted_indices = np.expand_dims(np.argsort(self.points[:, 0]).astype(np.float) + 1, axis=1)
@@ -780,7 +780,7 @@ class SetOfPoints:
         new_weights = []
         new_sensitivities = []
         new_indexes = []
-        for i in range(self_size):
+        for i in np.sort(self_indexes):
             for j in range(self_size):
                 if self.indexes[j] == i:
                     new_points.append(self_points[j])
@@ -926,7 +926,7 @@ class SetOfPoints:
                 flag2 = True
                 break
         if Q.get_size() > 0:
-            Q.set_all_sensitivities(max_sensitivity * max_sensitivity_multiply_factor) # here we set the sensitivities of the points who left to the highest - since they are outliers with a very high probability
+            Q.set_all_sensitivities(1) # here we set the sensitivities of the points who left to the highest - since they are outliers with a very high probability
             temp_set.add_set_of_points(Q) #and now temp_set is all the points we began with - just with updated sensitivities
         # T = temp_set.get_sum_of_sensitivities()
         # temp_set.set_weights(T, m) #sets the weights as described in line 10 in main alg
@@ -939,10 +939,13 @@ class SetOfPoints:
         con2 = np.vectorize(self.f2)
         cluster_WKmeans = self.coreset_return_sensitivities(self, self.parameters_config.k,
                                                          self.parameters_config.coreset_size)
+        cluster_WKmeans.sort_by_indexes()
         idx_sort = self.sortOnSubspace()
-
-        S = np.maximum.reduce([con1(idx_sort), con2(idx_sort, self.get_size()), np.squeeze(
-            cluster_WKmeans.sensitivities) if cluster_WKmeans.get_size() > 1 else cluster_WKmeans.sensitivities])
+        try:
+            tmp = np.array([con1(idx_sort), con2(idx_sort, self.get_size()), np.squeeze(cluster_WKmeans.sensitivities) if cluster_WKmeans.get_size() > 1 else cluster_WKmeans.sensitivities[0]]) # TODO: temporary change, remove the 0
+        except:
+            print("a")
+        S = np.max(tmp, axis=0)
         # plt.scatter(self.points[:, 0], self.points[:, 1])
         # plt.show()
         return S
@@ -964,10 +967,19 @@ class SetOfPoints:
         if self.get_size() == 1:
             return np.array([1])
         else:
+            # self.points = np.array([[1, 1], [2, 2], [3, 3], [4, 4], [0, 0], [5, 5], [-1, -1]])
             v = self.points[0] - self.points[1]
             I = np.apply_along_axis(lambda x: np.dot(x, v), axis=1, arr=self.points)
             y = np.zeros_like(I)
             y[np.argsort(I)] = np.arange(I.shape[0]) + 1
+
+            # fig, ax = plt.subplots()
+            # ax.scatter(self.points[:, 0], self.points[:, 1])
+            # ax.scatter(self.points[[0, 1], 0], self.points[[0, 1], 1], color='red')
+            # for i in range(len(self.points)):
+            #     ax.annotate(y[i], (self.points[i][0], self.points[i][1]))
+            #
+            # plt.show()
             return y
 
     #########################################################

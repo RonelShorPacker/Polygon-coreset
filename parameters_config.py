@@ -4,7 +4,7 @@ class ParameterConfig:
         # main parameters
         self.header_indexes = None
         self.dim = 2
-        self.k = 3
+        self.k = 4
         self.coreset_size = 100
 
         # experiment  parameters
@@ -36,7 +36,7 @@ class ParameterConfig:
         # weighted centers coreset parameters
         self.median_sample_size = 20
         self.closest_to_median_rate = 0.5
-        self.number_of_remains_multiply_factor = 0.5
+        self.number_of_remains_multiply_factor = 1 - 0.05 / (2 * self.k)
         self.max_sensitivity_multiply_factor = 1
 
         # iterations

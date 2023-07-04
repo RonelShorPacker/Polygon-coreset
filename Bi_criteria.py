@@ -3,7 +3,7 @@ from parameters_config import ParameterConfig
 from sklearn.decomposition import TruncatedSVD
 from scipy.linalg import null_space
 
-np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
+# np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning) # TODO: added the comment
 
 def clusterIdxsBasedOnKSubspaces(P, B):
     """
@@ -14,7 +14,7 @@ def clusterIdxsBasedOnKSubspaces(P, B):
     """
     n = P.shape[0]
     idxs = np.arange(n)  # a numpy array of indices
-    centers = np.array(B)  # a numpy array of the flats
+    centers = np.array(B, dtype=tuple)  # a numpy array of the flats # TODO: added the tuple
 
     dists = np.apply_along_axis(lambda x: computeDistanceToSubspace(P[idxs, :], x[0], x[1]), 1, centers)  # compute the
                                                                                                 # distance between
@@ -183,7 +183,7 @@ def projectPointsToSubspace(P, X, v):
 def applyBiCriteria(P, B, I):
     clusters = []
     for i in range(len(B)):
-        F = np.array(B)
+        F = np.array(B, dtype=tuple) # TODO: added the tuple
         idx = np.where(I == i)[0]
         if np.size(idx):
             P_c = P.get_points_from_indices(idx)
